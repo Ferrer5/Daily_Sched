@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Schedule App</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#4095f4" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="phone-shell">
+      <div class="screen home-screen" id="screen-home">
+        <header class="profile-header">
+          <div class="avatar" id="avatar">JD</div>
+          <div class="profile-copy">
+            <strong id="profile-name">Jhon Dong</strong>
+            <span id="profile-job">Graphics Designer</span>
+          </div>
+          <button class="circle-button" id="settings-btn" aria-label="Settings" data-icon="settings"></button>
+        </header>
+
+        <div class="schedule-heading">
+          <div>
+            <h2>Today's Schedule</h2>
+            <span id="schedule-date"></span>
+          </div>
+          <span class="task-count" id="task-count">0 tasks</span>
+        </div>
+
+        <div class="schedule-list" id="schedule-list"></div>
+      </div>
+
+      <div class="screen compose-screen" id="screen-compose" hidden>
+        <header class="screen-header">
+          <button class="circle-button" id="compose-back" aria-label="Back" data-icon="back"></button>
+          <h1>Create Note</h1>
+          <button class="circle-button" aria-label="Share note" data-icon="upload"></button>
+        </header>
+        <input class="title-input" value="I will Going To USA." aria-label="Note title" />
+        <textarea class="note-editor" placeholder="Write Your Notes..." aria-label="Note content"></textarea>
+        <div class="note-actions">
+          <button>Add Tag</button><button>Add Category</button><button>Reminder</button>
+        </div>
+        <h2 class="assist-title">AI Assist</h2>
+        <div class="assist-grid">
+          <button><span class="lime" data-icon="spark"></span>Summarize<br />Note</button>
+          <button><span class="purple">Aa</span>Rewrite for<br />Clarity</button>
+          <button><span class="coral">↗</span>Convert to<br />Bullets</button>
+          <button><span class="pink">Aa</span>Generate<br />Title</button>
+        </div>
+      </div>
+
+      <div class="screen audio-screen" id="screen-audio" hidden>
+        <header class="screen-header">
+          <button class="circle-button" id="audio-back" aria-label="Back" data-icon="back"></button>
+          <h1>Audio</h1>
+          <button class="circle-button" aria-label="Share recording" data-icon="upload"></button>
+        </header>
+        <p class="transcript">
+          Today we discussed campaign performance, content calendar, and upcoming tasks for the next sprint.
+          The main focus will be improving conversion rate and optimizing landing pages...
+        </p>
+        <div class="waveform" id="waveform" aria-hidden="true"></div>
+        <div class="recording-controls">
+          <button class="accept-button" aria-label="Save recording" data-icon="check"></button>
+          <button class="record-button" id="record-btn" aria-label="Start recording" data-icon="mic" data-size="25"></button>
+          <button class="cancel-button" id="cancel-btn" aria-label="Cancel recording" data-icon="close"></button>
+        </div>
+        <strong class="timer" id="timer">00:00:26</strong>
+      </div>
+
+      <div class="floating-add" id="floating-add">
+        <button id="add-btn" aria-label="Add to schedule" data-icon="plus" data-size="25"></button>
+      </div>
+
+      <div class="modal-backdrop" id="modal">
+        <section class="schedule-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <div class="modal-header">
+            <div>
+              <span id="modal-eyebrow">ADD TO SCHEDULE</span>
+              <h2 id="modal-title">New Schedule</h2>
+            </div>
+            <button type="button" id="modal-close" aria-label="Close modal" data-icon="close" data-size="18"></button>
+          </div>
+          <form id="schedule-form">
+            <label>ToDo
+              <input id="f-title" name="title" placeholder="Enter your to-do" required />
+            </label>
+            <label>Time
+              <input id="f-time" name="time" type="time" value="09:00" />
+            </label>
+            <div class="repeat-modes" id="repeat-modes">
+              <button type="button" data-mode="once" class="selected">Only once</button>
+              <button type="button" data-mode="repeat">Repeat</button>
+              <button type="button" data-mode="weekly">Weekly</button>
+            </div>
+            <label id="repeat-select-label" hidden>Repeat every
+              <span class="select-wrap"><select id="f-repeat" name="repeat"></select></span>
+            </label>
+            <fieldset class="weekly-picker" id="weekly-picker" hidden>
+              <legend>Repeat on</legend>
+              <div id="weekly-days"></div>
+            </fieldset>
+            <button class="save-event" id="save-btn" type="submit">Add</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="profile-modal">
+        <section class="schedule-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+          <div class="modal-header">
+            <div>
+              <span>SETTINGS</span>
+              <h2 id="profile-title">Edit Profile</h2>
+            </div>
+            <button type="button" id="profile-close" aria-label="Close" data-icon="close" data-size="18"></button>
+          </div>
+          <form id="profile-form">
+            <div class="profile-preview">
+              <button type="button" class="avatar big photo-btn" id="preview-avatar" aria-label="Change photo"></button>
+              <input type="file" id="p-photo" accept="image/*" hidden />
+              <button type="button" class="link-btn" id="remove-photo" hidden>Remove photo</button>
+            </div>
+            <label>Name
+              <input id="p-name" maxlength="30" placeholder="Your name" required />
+            </label>
+            <label>Occupation
+              <input id="p-job" maxlength="36" placeholder="What do you do?" />
+            </label>
+            <div class="color-picker" id="color-picker" aria-label="Avatar color"></div>
+            <button class="save-event" type="submit">Save profile</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="home-indicator"></div>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
