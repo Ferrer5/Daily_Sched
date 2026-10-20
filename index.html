@@ -14,11 +14,13 @@
     <section class="phone-shell">
       <div class="screen home-screen" id="screen-home">
         <header class="profile-header">
-          <div class="avatar" id="avatar">JD</div>
-          <div class="profile-copy">
-            <strong id="profile-name">Jhon Dong</strong>
-            <span id="profile-job">Graphics Designer</span>
-          </div>
+          <button class="profile-trigger" id="profile-trigger" type="button" aria-label="View profile">
+            <span class="avatar" id="avatar">JD</span>
+            <span class="profile-copy">
+              <strong id="profile-name">Jhon Dong</strong>
+              <span id="profile-job">Graphics Designer</span>
+            </span>
+          </button>
           <button class="circle-button" id="settings-btn" aria-label="Settings" data-icon="settings"></button>
         </header>
 
@@ -104,6 +106,9 @@
               <legend>Repeat on</legend>
               <div id="weekly-days"></div>
             </fieldset>
+            <label id="ends-label" hidden>Stops after
+              <span class="select-wrap"><select id="f-ends" name="ends"></select></span>
+            </label>
             <button class="save-event" id="save-btn" type="submit">Add</button>
           </form>
         </section>
@@ -133,6 +138,15 @@
             <div class="color-picker" id="color-picker" aria-label="Avatar color"></div>
             <button class="save-event" type="submit">Save profile</button>
           </form>
+        </section>
+      </div>
+
+      <div class="avatar-zoom-backdrop" id="avatar-zoom" role="presentation">
+        <section class="avatar-zoom-card" role="dialog" aria-modal="true" aria-labelledby="zoom-profile-name">
+          <button type="button" class="avatar-zoom-close" id="avatar-zoom-close" aria-label="Close profile" data-icon="close"></button>
+          <div class="avatar zoomed-avatar" id="zoomed-avatar" aria-hidden="true"></div>
+          <h2 id="zoom-profile-name"></h2>
+          <p id="zoom-profile-job"></p>
         </section>
       </div>
 

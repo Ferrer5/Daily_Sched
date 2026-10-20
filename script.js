@@ -89,6 +89,8 @@ const els = {
   modes: $("repeat-modes"),
   repeatLabel: $("repeat-select-label"),
   weeklyPicker: $("weekly-picker"),
+  ends: $("f-ends"),
+  endsLabel: $("ends-label"),
   weeklyDays: $("weekly-days"),
   eyebrow: $("modal-eyebrow"),
   modalTitle: $("modal-title"),
@@ -99,12 +101,66 @@ const els = {
   timer: $("timer"),
 };
 
-function repeatSummary(repeat, days) {
-  if (repeat === "weekly" && days.length) {
-    return `Every week · ${days.map((day) => day.slice(0, 3)).join(", ")}`;
+const monthSteps = { monthly: 1, "two-months": 2, "three-months": 3, "six-months": 6, yearly: 12 };
+
+function toISO(date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function parseISO(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(date, count) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + count);
+}
+
+function addMonths(date, count) {
+  const target = new Date(date.getFullYear(), date.getMonth() + count, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return new Date(target.getFullYear(), target.getMonth(), Math.min(date.getDate(), lastDay));
+}
+
+function occurrenceDate(item, n) {
+  const start = parseISO(item.startDate);
+  if (item.repeat === "daily") return addDays(start, n - 1);
+  if (item.repeat === "weekly" && item.repeatDays.length) {
+    let found = 0;
+    for (let i = 0; i < 7 * n; i++) {
+      const date = addDays(start, i);
+      if (item.repeatDays.includes(weekDays[date.getDay()].name) && ++found === n) return date;
+    }
+    return addDays(start, 7 * n);
   }
-  const found = repeatOptions.find((option) => option.value === repeat);
-  return found ? found.label : "Only once";
+  if (item.repeat === "weekly") return addDays(start, (n - 1) * 7);
+  if (monthSteps[item.repeat]) return addMonths(start, (n - 1) * monthSteps[item.repeat]);
+  return start;
+}
+
+function isFinished(item) {
+  if (!item.endAfter || !item.startDate) return false;
+  return toISO(new Date()) > toISO(occurrenceDate(item, item.endAfter));
+}
+
+function repeatSummary(repeat, days, endAfter = 0) {
+  let text;
+  if (repeat === "weekly" && days.length) {
+    text = `Every week · ${days.map((day) => day.slice(0, 3)).join(", ")}`;
+  } else {
+    const found = repeatOptions.find((option) => option.value === repeat);
+    text = found ? found.label : "Only once";
+  }
+  return endAfter ? `${text} · ${endAfter} times` : text;
+}
+
+function formatTime(value) {
+  const [hours, minutes] = String(value).split(":").map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return value;
+  const period = hours >= 12 ? "PM" : "AM";
+  return `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
 function renderSchedule() {
@@ -113,11 +169,12 @@ function renderSchedule() {
   } catch {
     // The schedule still works for this page view when browser storage is unavailable.
   }
-  els.count.textContent = `${schedule.length} ${schedule.length === 1 ? "task" : "tasks"}`;
-  const orderedSchedule = [...schedule].sort((first, second) => first.time.localeCompare(second.time));
+  const visibleSchedule = schedule.filter((item) => !isFinished(item));
+  els.count.textContent = `${visibleSchedule.length} ${visibleSchedule.length === 1 ? "task" : "tasks"}`;
+  const orderedSchedule = [...visibleSchedule].sort((first, second) => first.time.localeCompare(second.time));
   els.list.innerHTML = orderedSchedule.map((item) => `
     <article class="schedule-item" data-id="${item.id}">
-      <time>${escapeHtml(item.time)}</time>
+      <time>${escapeHtml(formatTime(item.time))}</time>
       <span class="schedule-accent ${item.accent}"></span>
       <span class="schedule-copy">
         <strong>${escapeHtml(item.title)}</strong>
@@ -147,6 +204,7 @@ function setMode(mode) {
   els.modes.querySelectorAll("button").forEach((button) => button.classList.toggle("selected", button.dataset.mode === mode));
   els.repeatLabel.hidden = mode !== "repeat";
   els.weeklyPicker.hidden = mode !== "weekly";
+  els.endsLabel.hidden = mode === "once";
 }
 
 function showScreen(name) {
@@ -175,6 +233,7 @@ function openModal(item) {
   const mode = !item || item.repeat === "once" ? "once"
     : item.repeat === "weekly" && item.repeatDays.length ? "weekly" : "repeat";
   els.repeat.value = mode === "repeat" ? item.repeat : "daily";
+  els.ends.value = item && item.endAfter ? String(item.endAfter) : "0";
   draftDays = item && item.repeatDays.length ? [...item.repeatDays] : ["Monday"];
   els.eyebrow.textContent = item ? "UPDATE SCHEDULE" : "ADD TO SCHEDULE";
   els.modalTitle.textContent = item ? "Edit Schedule" : "New Schedule";
@@ -199,6 +258,8 @@ document.querySelectorAll("[data-icon]").forEach((element) => {
 els.repeat.innerHTML = repeatOptions
   .filter((option) => option.value !== "once")
   .map((option) => `<option value="${option.value}">${option.label}</option>`).join("");
+els.ends.innerHTML = '<option value="0">Never</option>' +
+  Array.from({ length: 19 }, (_, i) => `<option value="${i + 2}">${i + 2} times</option>`).join("");
 
 els.modes.addEventListener("click", (event) => {
   const button = event.target.closest("[data-mode]");
@@ -241,10 +302,26 @@ els.form.addEventListener("submit", (event) => {
 
   const repeat = draftMode === "once" ? "once" : draftMode === "weekly" ? "weekly" : els.repeat.value;
   const repeatDays = draftMode === "weekly" ? [...draftDays] : [];
-  const detail = repeatSummary(repeat, repeatDays);
+  const endAfter = draftMode === "once" ? 0 : Number(els.ends.value);
+  const detail = repeatSummary(repeat, repeatDays, endAfter);
+  const startDate = toISO(new Date());
 
   if (editingId !== null) {
-    schedule = schedule.map((item) => item.id === editingId ? { ...item, time: els.time.value, title, detail, repeat, repeatDays } : item);
+    schedule = schedule.map((item) => {
+      if (item.id !== editingId) return item;
+      const autoLabel = item.duration === "Once" || item.duration === "Repeats";
+      return {
+        ...item,
+        time: els.time.value,
+        title,
+        detail,
+        repeat,
+        repeatDays,
+        endAfter,
+        startDate,
+        duration: autoLabel ? (repeat === "once" ? "Once" : "Repeats") : item.duration,
+      };
+    });
   } else {
     schedule.push({
       id: Date.now(),
@@ -255,6 +332,8 @@ els.form.addEventListener("submit", (event) => {
       accent: ["blue-accent", "orange-accent", "purple-accent"][schedule.length % 3],
       repeat,
       repeatDays,
+      endAfter,
+      startDate,
     });
   }
   renderSchedule();
@@ -351,6 +430,9 @@ function renderProfile() {
   $("profile-name").textContent = profile.name;
   $("profile-job").textContent = profile.job;
   paintAvatar($("avatar"), profile.name, profile.color, profile.photo);
+  $("zoom-profile-name").textContent = profile.name;
+  $("zoom-profile-job").textContent = profile.job;
+  paintAvatar($("zoomed-avatar"), profile.name, profile.color, profile.photo);
 }
 
 function renderPreview() {
@@ -377,7 +459,23 @@ function closeProfile() {
 $("settings-btn").addEventListener("click", openProfile);
 $("profile-close").addEventListener("click", closeProfile);
 profileModal.addEventListener("mousedown", (event) => { if (event.target === profileModal) closeProfile(); });
-document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeProfile(); });
+const avatarZoom = $("avatar-zoom");
+function openAvatarZoom() {
+  avatarZoom.classList.add("is-open");
+}
+function closeAvatarZoom() {
+  avatarZoom.classList.remove("is-open");
+}
+
+$("profile-trigger").addEventListener("click", openAvatarZoom);
+$("avatar-zoom-close").addEventListener("click", closeAvatarZoom);
+avatarZoom.addEventListener("click", (event) => { if (event.target === avatarZoom) closeAvatarZoom(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeProfile();
+    closeAvatarZoom();
+  }
+});
 
 pName.addEventListener("input", renderPreview);
 $("color-picker").addEventListener("click", (event) => {
