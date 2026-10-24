@@ -284,6 +284,7 @@ els.list.addEventListener("click", (event) => {
     schedule = schedule.filter((item) => item.id !== id);
     openMenuId = null;
     renderSchedule();
+    scheduleAll();
   }
 });
 
@@ -312,6 +313,7 @@ els.form.addEventListener("submit", (event) => {
       const autoLabel = item.duration === "Once" || item.duration === "Repeats";
       return {
         ...item,
+        fireAt: undefined,
         time: els.time.value,
         title,
         detail,
@@ -337,6 +339,7 @@ els.form.addEventListener("submit", (event) => {
     });
   }
   renderSchedule();
+  scheduleAll();
   closeModal();
 });
 
@@ -376,14 +379,97 @@ document.addEventListener("scroll", closeMenu, true);
 document.addEventListener("wheel", closeMenu, { passive: true });
 document.addEventListener("touchmove", closeMenu, { passive: true });
 
-/* ---------- PWA: register the service worker ---------- */
-if ("serviceWorker" in navigator) {
+/* ---------- PWA: register the service worker outside native apps ---------- */
+const isNative = window.Capacitor?.isNativePlatform?.();
+
+if (!isNative && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("service-worker.js").catch((error) => {
       console.warn("Service worker failed:", error);
     });
   });
 }
+
+/* ---------- Alarms (Capacitor Local Notifications, Android app only) ---------- */
+const LN = window.Capacitor?.Plugins?.LocalNotifications;
+const weekdayNumber = { Sunday: 1, Monday: 2, Tuesday: 3, Wednesday: 4, Thursday: 5, Friday: 6, Saturday: 7 };
+
+async function setupNotifications() {
+  if (!isNative || !LN) return;
+  await LN.requestPermissions();
+  await LN.createChannel({ id: "alarms", name: "Schedule alarms", importance: 5, visibility: 1, vibration: true });
+  const exact = await LN.checkExactNotificationSetting();
+  if (exact.exact_alarm !== "granted") await LN.changeExactNotificationSetting();
+}
+
+function nextOccurrence(hour, minute) {
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  if (date <= new Date()) date.setDate(date.getDate() + 1);
+  return date;
+}
+
+// Future ring times for events that have a start date, using the existing occurrenceDate() rules.
+function upcomingOccurrences(item, hour, minute, limit) {
+  const times = [];
+  const max = item.endAfter || 400;
+  for (let n = 1; n <= max && times.length < limit; n++) {
+    const when = occurrenceDate(item, n);
+    when.setHours(hour, minute, 0, 0);
+    if (when > new Date()) times.push(when);
+  }
+  return times;
+}
+
+async function scheduleAll() {
+  if (!isNative || !LN) return;
+  try {
+    const pending = await LN.getPending();
+    if (pending.notifications.length) await LN.cancel({ notifications: pending.notifications });
+
+    const notifications = [];
+    let changed = false;
+    for (const item of schedule) {
+      if (isFinished(item)) continue;
+      const [hour, minute] = item.time.split(":").map(Number);
+      const base = (Math.abs(item.id) % 20000000) * 100; // Android needs 32-bit notification IDs
+      let n = 0;
+      const add = (when) => notifications.push({
+        id: base + n++, title: item.title, body: item.detail, channelId: "alarms",
+        schedule: { ...when, allowWhileIdle: true },
+      });
+      const hasStart = Boolean(item.startDate);
+
+      if (item.repeat === "once") {
+        // Remember the first ring time so reopening the app never re-arms a one-time alarm that already rang.
+        if (item.fireAt === undefined) { item.fireAt = nextOccurrence(hour, minute).getTime(); changed = true; }
+        if (item.fireAt > Date.now()) add({ at: new Date(item.fireAt) });
+      } else if (hasStart && item.endAfter) {
+        // "Ends after N times": schedule each remaining occurrence individually.
+        upcomingOccurrences(item, hour, minute, 50).forEach((at) => add({ at }));
+      } else if (item.repeat === "daily") {
+        add({ at: nextOccurrence(hour, minute), every: "day" });
+      } else if (item.repeat === "weekly" && item.repeatDays.length) {
+        item.repeatDays.forEach((day) => add({ on: { weekday: weekdayNumber[day], hour, minute } }));
+      } else if (item.repeat === "weekly") {
+        const [first] = hasStart ? upcomingOccurrences(item, hour, minute, 1) : [];
+        add({ at: first || nextOccurrence(hour, minute), every: "week" });
+      } else if (monthSteps[item.repeat]) {
+        // Month-based repeats: schedule the next 24 occurrences; reopening the app refreshes them.
+        if (hasStart) upcomingOccurrences(item, hour, minute, 24).forEach((at) => add({ at }));
+        else add({ at: nextOccurrence(hour, minute), every: item.repeat === "yearly" ? "year" : "month" });
+      }
+    }
+    if (changed) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule)); } catch {}
+    }
+    if (notifications.length) await LN.schedule({ notifications });
+  } catch (error) {
+    console.warn("Could not schedule alarms:", error);
+  }
+}
+
+setupNotifications().then(scheduleAll).catch((error) => console.warn("Notification setup failed:", error));
 
 /* ---------- Profile (Settings) ---------- */
 const palette = [

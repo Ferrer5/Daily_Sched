@@ -4,5 +4,14 @@
   "scripts": {
     "start": "node server.js"
   },
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
 }

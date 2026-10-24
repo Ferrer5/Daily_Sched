@@ -30,7 +30,7 @@ const server = createServer(async (request, response) => {
   }
 
   try {
-    const content = await readFile(path.join(__dirname, file[0]));
+    const content = await readFile(path.join(__dirname, "www", file[0]));
     response.writeHead(200, {
       "Content-Type": file[1],
       "Cache-Control": "no-store",
