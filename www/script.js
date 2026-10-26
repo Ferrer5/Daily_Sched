@@ -53,13 +53,16 @@ function loadSchedule() {
     const parsedSchedule = JSON.parse(savedSchedule);
     if (!Array.isArray(parsedSchedule)) return defaultSchedule;
 
-    return parsedSchedule.map((item, index) => ({
-      ...item,
-      id: item.id ?? Date.now() + index,
-      accent: item.accent || ["blue-accent", "orange-accent", "purple-accent"][index % 3],
-      repeat: item.repeat || "once",
-      repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays : [],
-    }));
+    return parsedSchedule.map((item, index) => {
+      const storedId = item.id == null ? Date.now() + index : Number(item.id);
+      return {
+        ...item,
+        id: Number.isFinite(storedId) ? storedId : Date.now() + index,
+        accent: item.accent || ["blue-accent", "orange-accent", "purple-accent"][index % 3],
+        repeat: item.repeat || "once",
+        repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays : [],
+      };
+    });
   } catch {
     return defaultSchedule;
   }
@@ -71,6 +74,7 @@ const iconPaths = {
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
   mic: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
+  play: '<path d="M8 5v14l11-7z"/>',
   back: '<path d="m15 18-6-6 6-6"/>',
   upload: '<path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M5 14v5h14v-5"/>',
   spark: '<path d="m12 2 1.5 5.2L19 9l-5.5 1.8L12 16l-1.5-5.2L5 9l5.5-1.8L12 2ZM5 16l.8 2.2L8 19l-2.2.8L5 22l-.8-2.2L2 19l2.2-.8L5 16Z"/>',
@@ -529,14 +533,16 @@ try {
 } catch {}
 let draftColor = profile.color;
 let draftPhoto = profile.photo;
+let draftSound = getSoundId();
 
 const profileModal = $("profile-modal");
 const pName = $("p-name");
 const pJob = $("p-job");
-const pSound = $("p-sound");
-pSound.innerHTML = ALARM_SOUNDS.map((sound) =>
-  `<option value="${sound.id}">${sound.label}</option>`
-).join("");
+const soundDropdown = $("sound-dropdown");
+const soundList = $("sound-list");
+const soundTrigger = $("sound-trigger");
+const soundTriggerText = $("sound-trigger-text");
+const previewAudio = new Audio();
 
 function initials(name) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -603,17 +609,41 @@ function renderPreview() {
   ).join("");
 }
 
+function renderSoundList() {
+  soundList.innerHTML = ALARM_SOUNDS.map((sound) => {
+    const selected = sound.id === draftSound;
+    const soundIcon = selected
+      ? `<span class="sound-icon">${icon("check", 16)}</span>`
+      : `<button type="button" class="sound-icon" data-preview="${sound.id}" aria-label="Preview ${sound.label}">${icon("play", 16)}</button>`;
+    return `<div class="sound-row" role="option" tabindex="0" aria-selected="${selected}" data-sound="${sound.id}"><span>${sound.label}</span>${soundIcon}</div>`;
+  }).join("");
+}
+
+function setSoundListOpen(open) {
+  soundList.hidden = !open;
+  soundTrigger.setAttribute("aria-expanded", String(open));
+  if (open) {
+    soundList.querySelector(`[data-sound="${draftSound}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function openProfile() {
   pName.value = profile.name;
   pJob.value = profile.job;
-  pSound.value = getSoundId();
+  draftSound = getSoundId();
+  soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
+  setSoundListOpen(false);
   draftColor = profile.color;
   draftPhoto = profile.photo;
   renderPreview();
+  renderSoundList();
   profileModal.classList.add("is-open");
 }
 
 function closeProfile() {
+  setSoundListOpen(false);
+  previewAudio.pause();
+  previewAudio.currentTime = 0;
   profileModal.classList.remove("is-open");
 }
 
@@ -633,6 +663,11 @@ $("avatar-zoom-close").addEventListener("click", closeAvatarZoom);
 avatarZoom.addEventListener("click", (event) => { if (event.target === avatarZoom) closeAvatarZoom(); });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (!soundList.hidden) {
+      setSoundListOpen(false);
+      event.stopPropagation();
+      return;
+    }
     closeProfile();
     closeAvatarZoom();
   }
@@ -652,7 +687,7 @@ $("profile-form").addEventListener("submit", (event) => {
   if (!name) return;
   profile = { name, job: pJob.value.trim(), color: draftColor, photo: draftPhoto };
   try { localStorage.setItem("profile", JSON.stringify(profile)); } catch {}
-  try { localStorage.setItem(SOUND_KEY, pSound.value); } catch {}
+  try { localStorage.setItem(SOUND_KEY, draftSound); } catch {}
   scheduleAll();
   renderProfile();
   closeProfile();
@@ -660,9 +695,48 @@ $("profile-form").addEventListener("submit", (event) => {
 
 renderProfile();
 
-$("preview-sound").addEventListener("click", () => {
-  const sound = ALARM_SOUNDS.find((item) => item.id === pSound.value);
-  if (sound) new Audio("sounds/" + sound.file).play();
+function playSoundPreview(soundId) {
+  const sound = ALARM_SOUNDS.find((item) => item.id === soundId);
+  if (!sound) return;
+  previewAudio.pause();
+  previewAudio.currentTime = 0;
+  previewAudio.src = "sounds/" + sound.file;
+  previewAudio.play().catch(() => {});
+}
+
+soundDropdown.addEventListener("click", (event) => {
+  const preview = event.target.closest("[data-preview]");
+  if (preview && soundDropdown.contains(preview)) {
+    event.stopPropagation();
+    playSoundPreview(preview.dataset.preview);
+    return;
+  }
+  if (event.target.closest("#sound-trigger")) {
+    setSoundListOpen(soundList.hidden);
+    return;
+  }
+  const row = event.target.closest(".sound-row");
+  if (!row || !soundDropdown.contains(row)) return;
+  draftSound = row.dataset.sound;
+  soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
+  renderSoundList();
+  playSoundPreview(draftSound);
+  setSoundListOpen(false);
+});
+
+soundList.addEventListener("keydown", (event) => {
+  const row = event.target.closest(".sound-row");
+  if (!row || !soundList.contains(row) || !["Enter", " "].includes(event.key)) return;
+  event.preventDefault();
+  draftSound = row.dataset.sound;
+  soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
+  renderSoundList();
+  playSoundPreview(draftSound);
+  setSoundListOpen(false);
+});
+
+document.addEventListener("click", (event) => {
+  if (!soundDropdown.contains(event.target)) setSoundListOpen(false);
 });
 
 $("preview-avatar").addEventListener("click", () => $("p-photo").click());

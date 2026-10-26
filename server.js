@@ -12,6 +12,14 @@ const files = new Map([
   ["/icons/icon-192.png", ["icons/icon-192.png", "image/png"]],
   ["/icons/icon-512.png", ["icons/icon-512.png", "image/png"]],
   ["/icons/icon-maskable-512.png", ["icons/icon-maskable-512.png", "image/png"]],
+  ["/sounds/alarm_chime.wav", ["sounds/alarm_chime.wav", "audio/wav"]],
+  ["/sounds/alarm_bell.wav", ["sounds/alarm_bell.wav", "audio/wav"]],
+  ["/sounds/alarm_beep.wav", ["sounds/alarm_beep.wav", "audio/wav"]],
+  ["/sounds/alarm_marimba.wav", ["sounds/alarm_marimba.wav", "audio/wav"]],
+  ["/sounds/alarm_digital.wav", ["sounds/alarm_digital.wav", "audio/wav"]],
+  ["/sounds/alarm_dingdong.wav", ["sounds/alarm_dingdong.wav", "audio/wav"]],
+  ["/sounds/alarm_clock.wav", ["sounds/alarm_clock.wav", "audio/wav"]],
+  ["/sounds/alarm_soft.wav", ["sounds/alarm_soft.wav", "audio/wav"]],
 ]);
 
 const server = createServer(async (request, response) => {

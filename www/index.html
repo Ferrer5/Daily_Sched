@@ -135,13 +135,17 @@
             <label>Occupation
               <input id="p-job" maxlength="36" placeholder="What do you do?" />
             </label>
-            <label>Notification sound
-              <span class="sound-picker">
-                <span class="select-wrap"><select id="p-sound"></select></span>
-                <button type="button" class="preview-sound" id="preview-sound">Preview</button>
-              </span>
+            <div class="sound-field">
+              <span class="sound-label" id="sound-label">Notification sound</span>
+              <div class="sound-dropdown" id="sound-dropdown">
+                <button type="button" class="sound-trigger" id="sound-trigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sound-label sound-trigger-text">
+                  <span id="sound-trigger-text">Chime</span>
+                  <span class="sound-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="sound-list" id="sound-list" role="listbox" aria-labelledby="sound-label" hidden></div>
+              </div>
               <small class="sound-hint">If the sound doesn't change, check this app's notification settings in Android.</small>
-            </label>
+            </div>
             <div class="color-picker" id="color-picker" aria-label="Avatar color"></div>
             <button class="save-event" type="submit">Save profile</button>
           </form>
