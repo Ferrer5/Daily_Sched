@@ -1,5 +1,10 @@
 {
   "appId": "com.ferrer5.dailysched",
   "appName": "Schedule App",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "Keyboard": {
+      "resize": "none"
+    }
+  }
 }

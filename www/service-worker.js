@@ -1,4 +1,4 @@
-const CACHE = "schedule-app-v1";
+const CACHE = "schedule-app-v9";
 const FILES = [
   "./",
   "./index.html",

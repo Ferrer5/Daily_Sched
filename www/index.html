@@ -96,12 +96,41 @@
             </label>
             <div class="repeat-modes" id="repeat-modes">
               <button type="button" data-mode="once" class="selected">Only once</button>
-              <button type="button" data-mode="repeat">Repeat</button>
+              <div class="mode-wrap">
+                <button type="button" data-mode="repeat">Static Repeat</button>
+                <button type="button" class="help-btn" data-help="repeat" aria-label="What is Static Repeat?" aria-expanded="false" aria-controls="mode-hint" data-icon="help" data-size="14"></button>
+              </div>
               <button type="button" data-mode="weekly">Weekly</button>
+              <div class="mode-wrap">
+                <button type="button" data-mode="dynamic">Dynamic Repeat</button>
+                <button type="button" class="help-btn" data-help="dynamic" aria-label="What is Dynamic Repeat?" aria-expanded="false" aria-controls="mode-hint" data-icon="help" data-size="14"></button>
+              </div>
             </div>
+            <div class="mode-hint" id="mode-hint" role="status" hidden></div>
+            <label id="static-start-label" hidden>Start date
+              <input id="f-start-date" name="startDate" type="date" />
+            </label>
             <label id="repeat-select-label" hidden>Repeat every
               <span class="select-wrap"><select id="f-repeat" name="repeat"></select></span>
             </label>
+            <label id="dynamic-due-label" hidden>First due date
+              <input id="f-due-date" name="dueDate" type="date" required />
+            </label>
+            <div class="interval-row" id="dynamic-interval" hidden>
+              <label for="f-interval">Repeat every
+                <input id="f-interval" name="interval" type="number" min="1" max="99" value="3" required />
+              </label>
+              <label for="f-interval-unit">Unit
+                <span class="select-wrap">
+                  <select id="f-interval-unit" name="intervalUnit">
+                    <option value="day">Days</option>
+                    <option value="week">Weeks</option>
+                    <option value="month" selected>Months</option>
+                    <option value="year">Years</option>
+                  </select>
+                </span>
+              </label>
+            </div>
             <fieldset class="weekly-picker" id="weekly-picker" hidden>
               <legend>Repeat on</legend>
               <div id="weekly-days"></div>
@@ -110,6 +139,24 @@
               <span class="select-wrap"><select id="f-ends" name="ends"></select></span>
             </label>
             <button class="save-event" id="save-btn" type="submit">Add</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="done-modal">
+        <section class="schedule-modal mark-done-modal" role="dialog" aria-modal="true" aria-labelledby="done-title">
+          <div class="modal-header">
+            <div>
+              <span>UPDATE SCHEDULE</span>
+              <h2 id="done-title">When did you finish?</h2>
+            </div>
+            <button type="button" id="done-close" aria-label="Close modal" data-icon="close" data-size="18"></button>
+          </div>
+          <form id="done-form">
+            <label for="done-date">Completion date
+              <input id="done-date" name="doneDate" type="date" required />
+            </label>
+            <button class="save-event" type="submit">Confirm</button>
           </form>
         </section>
       </div>

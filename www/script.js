@@ -19,6 +19,11 @@ const weekDays = [
   { short: "S", name: "Saturday" },
 ];
 
+const modeHelp = {
+  repeat: "Repeats on a fixed schedule, like every 3 months, whether or not you finished the task.",
+  dynamic: "Waits until you mark the task done, then sets the next alarm that far from the day you finished it.",
+};
+
 const STORAGE_KEY = "daily-schedule-events";
 const ALARM_SOUNDS = [
   { id: "chime", label: "Chime", file: "alarm_chime.wav" },
@@ -61,6 +66,11 @@ function loadSchedule() {
         accent: item.accent || ["blue-accent", "orange-accent", "purple-accent"][index % 3],
         repeat: item.repeat || "once",
         repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays : [],
+        ...(item.repeat === "dynamic" ? {
+          dueDate: item.dueDate || toISO(new Date()),
+          interval: item.interval || { every: 3, unit: "month" },
+          lastDone: item.lastDone ?? null,
+        } : {}),
       };
     });
   } catch {
@@ -79,6 +89,7 @@ const iconPaths = {
   upload: '<path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M5 14v5h14v-5"/>',
   spark: '<path d="m12 2 1.5 5.2L19 9l-5.5 1.8L12 16l-1.5-5.2L5 9l5.5-1.8L12 2ZM5 16l.8 2.2L8 19l-2.2.8L5 22l-.8-2.2L2 19l2.2-.8L5 16Z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17h.01"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   more: '<circle cx="12" cy="5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>',
   edit: '<path d="m14 5 5 5M4 20l3.5-.7L19 7.8a1.8 1.8 0 0 0 0-2.6l-.2-.2a1.8 1.8 0 0 0-2.6 0L4.7 16.5 4 20Z"/>',
@@ -101,6 +112,74 @@ let draftDays = ["Monday"];
 let draftMode = "once";
 
 const $ = (id) => document.getElementById(id);
+
+const root = document.documentElement;
+let nativeKeyboardHeight = 0;
+let focusScrollTimer = null;
+
+function setKeyboardHeight(height) {
+  root.style.setProperty("--kb", `${height}px`);
+  root.style.setProperty("--vvh", `${window.innerHeight}px`);
+  root.classList.toggle("kb-open", height > 80);
+}
+
+function updateKeyboardHeight() {
+  const viewport = window.visualViewport;
+  const measuredHeight = viewport
+    ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+    : 0;
+  setKeyboardHeight(Math.max(measuredHeight, nativeKeyboardHeight));
+}
+
+updateKeyboardHeight();
+window.visualViewport?.addEventListener("resize", updateKeyboardHeight);
+window.visualViewport?.addEventListener("scroll", updateKeyboardHeight);
+
+document.addEventListener("focusin", (event) => {
+  const element = event.target;
+  if (!(element instanceof HTMLElement) || !element.matches("input, select, textarea") || !element.closest(".schedule-modal, .welcome")) return;
+  window.clearTimeout(focusScrollTimer);
+  focusScrollTimer = window.setTimeout(() => {
+    focusScrollTimer = null;
+    if (document.activeElement !== element) return;
+    const modal = element.closest(".schedule-modal");
+    if (modal) {
+      const form = element.closest("form");
+      if (!form) return;
+      const formRect = form.getBoundingClientRect();
+      const inputRect = element.getBoundingClientRect();
+      const targetTop = form.scrollTop + inputRect.top - formRect.top - (form.clientHeight - inputRect.height) / 2;
+      form.scrollTo({ top: targetTop, behavior: "smooth" });
+      return;
+    }
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 300);
+});
+
+document.addEventListener("focusout", () => {
+  window.setTimeout(() => {
+    if (document.activeElement.matches("input, select, textarea")) return;
+    nativeKeyboardHeight = 0;
+    setKeyboardHeight(0);
+  }, 0);
+});
+
+if (window.Capacitor?.isNativePlatform?.()) {
+  const capacitor = window.Capacitor;
+  const keyboard = capacitor.Plugins?.Keyboard
+    ?? (capacitor.isPluginAvailable?.("Keyboard") ? capacitor.registerPlugin?.("Keyboard") : null);
+  if (keyboard?.addListener) {
+    keyboard.addListener("keyboardWillShow", (info) => {
+      nativeKeyboardHeight = info.keyboardHeight;
+      updateKeyboardHeight();
+    }).catch((error) => console.warn("Keyboard show listener failed:", error));
+    keyboard.addListener("keyboardWillHide", () => {
+      nativeKeyboardHeight = 0;
+      updateKeyboardHeight();
+    }).catch((error) => console.warn("Keyboard hide listener failed:", error));
+  }
+}
+
 const els = {
   list: $("schedule-list"),
   count: $("task-count"),
@@ -123,6 +202,8 @@ const els = {
   record: $("record-btn"),
   timer: $("timer"),
 };
+const doneModal = $("done-modal");
+const doneDate = $("done-date");
 
 const monthSteps = { monthly: 1, "two-months": 2, "three-months": 3, "six-months": 6, yearly: 12 };
 
@@ -164,19 +245,46 @@ function occurrenceDate(item, n) {
 }
 
 function isFinished(item) {
+  if (item.repeat === "dynamic") return false;
   if (!item.endAfter || !item.startDate) return false;
   return toISO(new Date()) > toISO(occurrenceDate(item, item.endAfter));
 }
 
-function repeatSummary(repeat, days, endAfter = 0) {
+function repeatSummary(repeat, days, endAfter = 0, interval = null) {
   let text;
-  if (repeat === "weekly" && days.length) {
+  if (repeat === "dynamic") {
+    const units = { day: "day", week: "week", month: "month", year: "year" };
+    const unit = units[interval?.unit] || "month";
+    const every = Number(interval?.every) || 3;
+    text = `Every ${every} ${unit}${every === 1 ? "" : "s"} · after done`;
+  } else if (repeat === "weekly" && days.length) {
     text = `Every week · ${days.map((day) => day.slice(0, 3)).join(", ")}`;
   } else {
     const found = repeatOptions.find((option) => option.value === repeat);
     text = found ? found.label : "Only once";
   }
   return endAfter ? `${text} · ${endAfter} times` : text;
+}
+
+function shortDate(value) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(parseISO(value));
+}
+
+function dueLabel(item) {
+  const due = parseISO(item.dueDate);
+  const today = parseISO(toISO(new Date()));
+  const daysUntilDue = Math.round((Date.UTC(due.getFullYear(), due.getMonth(), due.getDate())
+    - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+  if (daysUntilDue < 0) {
+    const daysOverdue = Math.abs(daysUntilDue);
+    return { text: `Overdue · ${daysOverdue} ${daysOverdue === 1 ? "day" : "days"}`, overdue: true };
+  }
+  if (daysUntilDue === 0) return { text: "Due today", overdue: false };
+  if (daysUntilDue === 1) return { text: "Due tomorrow", overdue: false };
+  return {
+    text: `Due ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(due)}`,
+    overdue: false,
+  };
 }
 
 function formatTime(value) {
@@ -195,24 +303,32 @@ function renderSchedule() {
   const visibleSchedule = schedule.filter((item) => !isFinished(item));
   els.count.textContent = `${visibleSchedule.length} ${visibleSchedule.length === 1 ? "task" : "tasks"}`;
   const orderedSchedule = [...visibleSchedule].sort((first, second) => first.time.localeCompare(second.time));
-  els.list.innerHTML = orderedSchedule.map((item) => `
+  els.list.innerHTML = orderedSchedule.map((item) => {
+    const due = item.repeat === "dynamic" ? dueLabel(item) : null;
+    const startsLater = item.repeat !== "dynamic" && item.startDate > toISO(new Date());
+    const detail = item.repeat === "dynamic" ? repeatSummary(item.repeat, item.repeatDays, 0, item.interval)
+      : startsLater ? `${item.detail} · Starts ${shortDate(item.startDate)}` : item.detail;
+    return `
     <article class="schedule-item" data-id="${item.id}">
       <time>${escapeHtml(formatTime(item.time))}</time>
       <span class="schedule-accent ${item.accent}"></span>
       <span class="schedule-copy">
         <strong>${escapeHtml(item.title)}</strong>
-        <small>${escapeHtml(item.detail)}</small>
+        <small>${escapeHtml(detail)}</small>
       </span>
-      <span class="schedule-duration">${escapeHtml(item.duration)}</span>
+      <span class="schedule-duration ${due ? `due-label${due.overdue ? " overdue-label" : ""}` : ""}">${escapeHtml(due ? due.text : item.duration)}</span>
+      ${item.repeat === "dynamic" ? `<button class="mark-done-button" type="button" data-action="done" aria-label="Mark ${escapeHtml(item.title)} done">${icon("check", 15)}</button>` : "<span></span>"}
       <div class="event-menu-wrap">
         <button class="event-menu-trigger" type="button" data-action="menu" aria-label="More options for ${escapeHtml(item.title)}" aria-expanded="${openMenuId === item.id}">${icon("more", 18)}</button>
         ${openMenuId === item.id ? `
           <div class="event-menu" role="menu">
+            ${item.repeat === "dynamic" ? `<button type="button" role="menuitem" data-action="done">${icon("check", 15)}Mark done</button>` : ""}
             <button type="button" role="menuitem" data-action="edit">${icon("edit", 15)}Edit</button>
             <button class="delete-option" type="button" role="menuitem" data-action="delete">${icon("trash", 15)}Delete</button>
           </div>` : ""}
       </div>
-    </article>`).join("");
+    </article>`;
+  }).join("");
 }
 
 function renderWeekly() {
@@ -223,11 +339,18 @@ function renderWeekly() {
 }
 
 function setMode(mode) {
+  closeOpenDropdown();
   draftMode = mode;
+  hideModeHint();
   els.modes.querySelectorAll("button").forEach((button) => button.classList.toggle("selected", button.dataset.mode === mode));
   els.repeatLabel.hidden = mode !== "repeat";
+  $("static-start-label").hidden = mode !== "repeat";
   els.weeklyPicker.hidden = mode !== "weekly";
-  els.endsLabel.hidden = mode === "once";
+  $("dynamic-due-label").hidden = mode !== "dynamic";
+  $("dynamic-interval").hidden = mode !== "dynamic";
+  $("f-due-date").required = mode === "dynamic";
+  $("f-interval").required = mode === "dynamic";
+  els.endsLabel.hidden = mode === "once" || mode === "dynamic";
 }
 
 function showScreen(name) {
@@ -250,13 +373,24 @@ function setRecording(value) {
 }
 
 function openModal(item) {
+  closeOpenDropdown();
+  hideModeHint();
   editingId = item ? item.id : null;
   els.title.value = item ? item.title : "";
   els.time.value = item ? item.time : "09:00";
+  const today = toISO(new Date());
+  $("f-start-date").value = item?.startDate || today;
+  if (item) $("f-start-date").removeAttribute("min");
+  else $("f-start-date").min = today;
   const mode = !item || item.repeat === "once" ? "once"
+    : item.repeat === "dynamic" ? "dynamic"
     : item.repeat === "weekly" && item.repeatDays.length ? "weekly" : "repeat";
   els.repeat.value = mode === "repeat" ? item.repeat : "daily";
   els.ends.value = item && item.endAfter ? String(item.endAfter) : "0";
+  $("f-due-date").value = item?.repeat === "dynamic" ? item.dueDate : toISO(new Date());
+  $("f-interval").value = item?.repeat === "dynamic" ? item.interval.every : 3;
+  $("f-interval-unit").value = item?.repeat === "dynamic" ? item.interval.unit : "month";
+  refreshCustomDropdowns();
   draftDays = item && item.repeatDays.length ? [...item.repeatDays] : ["Monday"];
   els.eyebrow.textContent = item ? "UPDATE SCHEDULE" : "ADD TO SCHEDULE";
   els.modalTitle.textContent = item ? "Edit Schedule" : "New Schedule";
@@ -269,7 +403,25 @@ function openModal(item) {
   els.title.focus({ preventScroll: true });
 }
 
+function openDoneModal(id) {
+  const item = schedule.find((entry) => entry.id === id && entry.repeat === "dynamic");
+  if (!item) return;
+  openMenuId = null;
+  renderSchedule();
+  doneModal.dataset.eventId = String(id);
+  doneDate.value = toISO(new Date());
+  doneDate.max = toISO(new Date());
+  doneModal.classList.add("is-open");
+}
+
+function closeDoneModal() {
+  doneModal.classList.remove("is-open");
+  delete doneModal.dataset.eventId;
+}
+
 function closeModal() {
+  closeOpenDropdown();
+  hideModeHint();
   els.modal.classList.remove("is-open");
   editingId = null;
 }
@@ -284,9 +436,247 @@ els.repeat.innerHTML = repeatOptions
 els.ends.innerHTML = '<option value="0">Never</option>' +
   Array.from({ length: 19 }, (_, i) => `<option value="${i + 2}">${i + 2} times</option>`).join("");
 
+const customDropdowns = new Map();
+let openCustomDropdown = null;
+
+function closeOpenDropdown() {
+  if (!openCustomDropdown) return;
+  openCustomDropdown.close();
+}
+
+function refreshCustomDropdowns() {
+  customDropdowns.forEach((dropdown) => dropdown.refresh());
+}
+
+function makeDropdown(selectEl) {
+  const wrapper = selectEl.closest(".select-wrap");
+  if (!wrapper) throw new Error(`Custom dropdown requires a .select-wrap for #${selectEl.id}.`);
+
+  selectEl.hidden = true;
+  wrapper.classList.add("has-custom-dropdown");
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "custom-select-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+
+  const label = document.createElement("span");
+  const chevron = document.createElement("span");
+  chevron.className = "custom-select-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  trigger.append(label, chevron);
+
+  const list = document.createElement("div");
+  list.className = "custom-select-list";
+  list.id = `${selectEl.id}-options`;
+  list.setAttribute("role", "listbox");
+  list.hidden = true;
+  trigger.setAttribute("aria-controls", list.id);
+  wrapper.append(trigger, list);
+
+  const refresh = () => {
+    const selected = selectEl.selectedOptions[0];
+    label.textContent = selected?.textContent ?? "";
+    list.replaceChildren(...Array.from(selectEl.options, (option) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "custom-select-option";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(option.value === selectEl.value));
+      row.dataset.value = option.value;
+      const text = document.createElement("span");
+      text.textContent = option.textContent;
+      row.append(text);
+      if (option.value === selectEl.value) {
+        const check = document.createElement("span");
+        check.className = "custom-select-check";
+        check.innerHTML = icon("check", 16);
+        check.setAttribute("aria-hidden", "true");
+        row.append(check);
+      }
+      return row;
+    }));
+  };
+
+  const close = () => {
+    list.hidden = true;
+    list.classList.remove("opens-up", "no-space");
+    trigger.setAttribute("aria-expanded", "false");
+    if (openCustomDropdown === dropdown) openCustomDropdown = null;
+  };
+
+  const open = () => {
+    if (openCustomDropdown && openCustomDropdown !== dropdown) openCustomDropdown.close();
+    window.clearTimeout(focusScrollTimer);
+    focusScrollTimer = null;
+    openCustomDropdown = dropdown;
+    refresh();
+    list.classList.remove("opens-up");
+    list.style.maxHeight = "200px";
+    list.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+
+    const form = wrapper.closest("form");
+    if (form) {
+      const getSpace = () => {
+        const formRect = form.getBoundingClientRect();
+        const triggerRect = trigger.getBoundingClientRect();
+        return {
+          below: formRect.bottom - triggerRect.bottom,
+          above: triggerRect.top - formRect.top,
+        };
+      };
+      let space = getSpace();
+      const minimumRowsHeight = 140;
+      const scrollForm = (direction, amount) => {
+        const maxScroll = form.scrollHeight - form.clientHeight;
+        if (direction === "down") {
+          form.scrollTop += Math.max(0, Math.min(amount, maxScroll - form.scrollTop));
+        } else {
+          form.scrollTop -= Math.min(amount, form.scrollTop);
+        }
+      };
+
+      if (space.above < 0) {
+        scrollForm("up", -space.above);
+        space = getSpace();
+      } else if (space.below < 0) {
+        scrollForm("down", -space.below);
+        space = getSpace();
+      }
+
+      if (Math.max(space.below, space.above) < minimumRowsHeight) {
+        if (space.below >= space.above) {
+          scrollForm("down", Math.min(minimumRowsHeight - space.below, Math.max(0, space.above)));
+          space = getSpace();
+          if (Math.max(space.below, space.above) < minimumRowsHeight) {
+            scrollForm("up", Math.min(minimumRowsHeight - space.above, Math.max(0, space.below)));
+          }
+        } else {
+          scrollForm("up", Math.min(minimumRowsHeight - space.above, Math.max(0, space.below)));
+          space = getSpace();
+          if (Math.max(space.below, space.above) < minimumRowsHeight) {
+            scrollForm("down", Math.min(minimumRowsHeight - space.below, Math.max(0, space.above)));
+          }
+        }
+        space = getSpace();
+      }
+
+      const availableSpace = Math.min(200, Math.max(space.below, space.above));
+      const listHeight = Math.max(0, availableSpace - 8);
+      const listNeeds = Math.min(200, list.scrollHeight);
+      const opensUp = space.below < listNeeds && space.above > space.below;
+      list.style.maxHeight = `${listHeight}px`;
+      list.classList.toggle("opens-up", opensUp);
+      list.classList.toggle("no-space", availableSpace < 8);
+    }
+
+    const selectedOption = [...list.querySelectorAll('[role="option"]')].find((option) => option.dataset.value === selectEl.value);
+    if (selectedOption) {
+      const listTop = list.getBoundingClientRect().top;
+      const optionTop = selectedOption.getBoundingClientRect().top;
+      const optionBottom = selectedOption.getBoundingClientRect().bottom;
+      if (optionTop < listTop) list.scrollTop -= listTop - optionTop;
+      else if (optionBottom > listTop + list.clientHeight) list.scrollTop += optionBottom - listTop - list.clientHeight;
+    }
+  };
+
+  const selectOption = (option) => {
+    if (!option) return;
+    selectEl.value = option.dataset.value;
+    selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+    refresh();
+    close();
+    trigger.focus();
+  };
+
+  trigger.addEventListener("click", () => {
+    if (list.hidden) open();
+    else close();
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (list.hidden) open();
+    const options = [...list.querySelectorAll('[role="option"]')];
+    const selectedIndex = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+    options[Math.max(0, selectedIndex)]?.focus();
+  });
+  list.addEventListener("click", (event) => {
+    const option = event.target.closest('[role="option"]');
+    if (option) selectOption(option);
+  });
+  list.addEventListener("keydown", (event) => {
+    const options = [...list.querySelectorAll('[role="option"]')];
+    const currentIndex = options.indexOf(event.target.closest('[role="option"]'));
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      trigger.focus();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      options[Math.min(options.length - 1, Math.max(0, currentIndex + offset))]?.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectOption(options[currentIndex]);
+    }
+  });
+  selectEl.addEventListener("change", refresh);
+
+  const dropdown = { close, refresh, wrapper };
+  customDropdowns.set(selectEl, dropdown);
+  refresh();
+  return dropdown;
+}
+
+makeDropdown(els.repeat);
+makeDropdown(els.ends);
+makeDropdown($("f-interval-unit"));
+
+document.addEventListener("click", (event) => {
+  if (openCustomDropdown && !openCustomDropdown.wrapper.contains(event.target)) closeOpenDropdown();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && openCustomDropdown) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeOpenDropdown();
+  }
+}, true);
+
 els.modes.addEventListener("click", (event) => {
   const button = event.target.closest("[data-mode]");
   if (button) setMode(button.dataset.mode);
+});
+
+const modeHint = $("mode-hint");
+
+function hideModeHint() {
+  modeHint.hidden = true;
+  modeHint.textContent = "";
+  els.modes.querySelectorAll(".help-btn").forEach((button) => button.setAttribute("aria-expanded", "false"));
+}
+
+els.modal.addEventListener("click", (event) => {
+  const helpButton = event.target.closest(".help-btn");
+  if (!helpButton) {
+    hideModeHint();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  const isExpanded = helpButton.getAttribute("aria-expanded") === "true";
+  hideModeHint();
+  if (isExpanded) return;
+
+  modeHint.textContent = modeHelp[helpButton.dataset.help];
+  modeHint.hidden = false;
+  helpButton.setAttribute("aria-expanded", "true");
 });
 
 els.list.addEventListener("click", (event) => {
@@ -303,6 +693,8 @@ els.list.addEventListener("click", (event) => {
     renderSchedule();
   } else if (action === "edit") {
     openModal(schedule.find((item) => item.id === id));
+  } else if (action === "done") {
+    openDoneModal(id);
   } else if (action === "delete") {
     schedule = schedule.filter((item) => item.id !== id);
     openMenuId = null;
@@ -324,17 +716,28 @@ els.form.addEventListener("submit", (event) => {
   const title = els.title.value.trim();
   if (!title) return;
 
-  const repeat = draftMode === "once" ? "once" : draftMode === "weekly" ? "weekly" : els.repeat.value;
+  const repeat = draftMode === "dynamic" ? "dynamic"
+    : draftMode === "once" ? "once" : draftMode === "weekly" ? "weekly" : els.repeat.value;
   const repeatDays = draftMode === "weekly" ? [...draftDays] : [];
-  const endAfter = draftMode === "once" ? 0 : Number(els.ends.value);
-  const detail = repeatSummary(repeat, repeatDays, endAfter);
-  const startDate = toISO(new Date());
+  const endAfter = draftMode === "once" || draftMode === "dynamic" ? 0 : Number(els.ends.value);
+  const interval = draftMode === "dynamic"
+    ? { every: Number($("f-interval").value), unit: $("f-interval-unit").value }
+    : null;
+  if (draftMode === "dynamic" && (!Number.isInteger(interval.every) || interval.every < 1 || interval.every > 99)) return;
+  const startDate = draftMode === "dynamic" ? undefined
+    : draftMode === "repeat" ? ($("f-start-date").value || toISO(new Date())) : toISO(new Date());
+  let detail = repeatSummary(repeat, repeatDays, endAfter, interval);
+  if (draftMode === "repeat" && startDate > toISO(new Date())) {
+    detail += ` · from ${shortDate(startDate)}`;
+  }
+  const dueDate = draftMode === "dynamic" ? $("f-due-date").value : undefined;
+  if (draftMode === "dynamic" && !dueDate) return;
 
   if (editingId !== null) {
     schedule = schedule.map((item) => {
       if (item.id !== editingId) return item;
       const autoLabel = item.duration === "Once" || item.duration === "Repeats";
-      return {
+      const updated = {
         ...item,
         fireAt: undefined,
         time: els.time.value,
@@ -343,12 +746,25 @@ els.form.addEventListener("submit", (event) => {
         repeat,
         repeatDays,
         endAfter,
-        startDate,
+        ...(startDate ? { startDate } : {}),
         duration: autoLabel ? (repeat === "once" ? "Once" : "Repeats") : item.duration,
       };
+      if (draftMode === "dynamic") {
+        delete updated.startDate;
+        delete updated.fireAt;
+        delete updated.endAfter;
+        updated.dueDate = dueDate;
+        updated.interval = interval;
+        updated.lastDone = item.repeat === "dynamic" ? item.lastDone ?? null : null;
+      } else {
+        delete updated.dueDate;
+        delete updated.interval;
+        delete updated.lastDone;
+      }
+      return updated;
     });
   } else {
-    schedule.push({
+    const newItem = {
       id: Date.now(),
       time: els.time.value,
       title,
@@ -357,19 +773,52 @@ els.form.addEventListener("submit", (event) => {
       accent: ["blue-accent", "orange-accent", "purple-accent"][schedule.length % 3],
       repeat,
       repeatDays,
-      endAfter,
-      startDate,
-    });
+    };
+    if (draftMode === "dynamic") {
+      newItem.dueDate = dueDate;
+      newItem.interval = interval;
+      newItem.lastDone = null;
+    } else {
+      newItem.endAfter = endAfter;
+      newItem.startDate = startDate;
+    }
+    schedule.push(newItem);
   }
   renderSchedule();
   scheduleAll();
   closeModal();
 });
 
+$("done-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const id = Number(doneModal.dataset.eventId);
+  const chosenDate = doneDate.value;
+  if (!chosenDate || chosenDate > toISO(new Date())) return;
+  schedule = schedule.map((item) => {
+    if (item.id !== id || item.repeat !== "dynamic") return item;
+    const interval = item.interval || { every: 3, unit: "month" };
+    const completedOn = parseISO(chosenDate);
+    const every = Number(interval.every) || 3;
+    const due = interval.unit === "day" ? addDays(completedOn, every)
+      : interval.unit === "week" ? addDays(completedOn, every * 7)
+        : addMonths(completedOn, every * (interval.unit === "year" ? 12 : 1));
+    return { ...item, lastDone: chosenDate, dueDate: toISO(due) };
+  });
+  renderSchedule();
+  scheduleAll();
+  closeDoneModal();
+});
+
 $("add-btn").addEventListener("click", () => openModal(null));
 $("modal-close").addEventListener("click", closeModal);
 els.modal.addEventListener("mousedown", (event) => { if (event.target === els.modal) closeModal(); });
-document.addEventListener("keydown", (event) => { if (event.key === "Escape" && els.modal.classList.contains("is-open")) closeModal(); });
+$("done-close").addEventListener("click", closeDoneModal);
+doneModal.addEventListener("mousedown", (event) => { if (event.target === doneModal) closeDoneModal(); });
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (doneModal.classList.contains("is-open")) closeDoneModal();
+  else if (els.modal.classList.contains("is-open")) closeModal();
+});
 
 $("compose-back").addEventListener("click", () => showScreen("home"));
 $("audio-back").addEventListener("click", () => { showScreen("home"); setRecording(false); });
@@ -474,13 +923,26 @@ async function scheduleAll() {
       });
       const hasStart = Boolean(item.startDate);
 
-      if (item.repeat === "once") {
+      if (item.repeat === "dynamic") {
+        const dueAt = parseISO(item.dueDate);
+        dueAt.setHours(hour, minute, 0, 0);
+        if (Number.isNaN(dueAt.getTime())) {
+          console.warn(`Skipping alarm for ${item.title}: invalid due date.`);
+          continue;
+        }
+        if (dueAt > new Date()) add({ at: dueAt });
+        else add({ at: nextOccurrence(hour, minute), every: "day" });
+      } else if (item.repeat === "once") {
         // Remember the first ring time so reopening the app never re-arms a one-time alarm that already rang.
         if (item.fireAt === undefined) { item.fireAt = nextOccurrence(hour, minute).getTime(); changed = true; }
         if (item.fireAt > Date.now()) add({ at: new Date(item.fireAt) });
       } else if (hasStart && item.endAfter) {
         // "Ends after N times": schedule each remaining occurrence individually.
         upcomingOccurrences(item, hour, minute, 50).forEach((at) => add({ at }));
+      } else if (item.repeat === "daily" && item.startDate > toISO(new Date())) {
+        const first = parseISO(item.startDate);
+        first.setHours(hour, minute, 0, 0);
+        add({ at: first, every: "day" });
       } else if (item.repeat === "daily") {
         add({ at: nextOccurrence(hour, minute), every: "day" });
       } else if (item.repeat === "weekly" && item.repeatDays.length) {
