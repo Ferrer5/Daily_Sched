@@ -20,6 +20,25 @@ const weekDays = [
 ];
 
 const STORAGE_KEY = "daily-schedule-events";
+const ALARM_SOUNDS = [
+  { id: "chime", label: "Chime", file: "alarm_chime.wav" },
+  { id: "bell", label: "Bell", file: "alarm_bell.wav" },
+  { id: "beep", label: "Beep", file: "alarm_beep.wav" },
+  { id: "marimba", label: "Marimba", file: "alarm_marimba.wav" },
+  { id: "digital", label: "Digital", file: "alarm_digital.wav" },
+  { id: "dingdong", label: "Ding Dong", file: "alarm_dingdong.wav" },
+  { id: "clock", label: "Alarm Clock", file: "alarm_clock.wav" },
+  { id: "soft", label: "Soft", file: "alarm_soft.wav" },
+];
+const SOUND_KEY = "alarm-sound";
+function getSoundId() {
+  try {
+    const saved = localStorage.getItem(SOUND_KEY);
+    if (ALARM_SOUNDS.some((s) => s.id === saved)) return saved;
+  } catch {}
+  return "chime";
+}
+const channelFor = (soundId) => `alarm_${soundId}`;
 const defaultSchedule = [
   { id: 1, time: "09:30", title: "Design review", detail: "Homepage exploration", duration: "45 min", accent: "blue-accent", repeat: "once", repeatDays: [] },
   { id: 2, time: "12:00", title: "Team lunch", detail: "Terrace café", duration: "1 hr", accent: "orange-accent", repeat: "once", repeatDays: [] },
@@ -397,7 +416,18 @@ const weekdayNumber = { Sunday: 1, Monday: 2, Tuesday: 3, Wednesday: 4, Thursday
 async function setupNotifications() {
   if (!isNative || !LN) return;
   await LN.requestPermissions();
-  await LN.createChannel({ id: "alarms", name: "Schedule alarms", importance: 5, visibility: 1, vibration: true });
+  try { await LN.deleteChannel({ id: "alarms" }); } catch {}
+  for (const s of ALARM_SOUNDS) {
+    await LN.createChannel({
+      id: channelFor(s.id),
+      name: `Alarm sound: ${s.label}`,
+      description: `Schedule alarms that play the ${s.label} sound`,
+      importance: 5,
+      visibility: 1,
+      vibration: true,
+      sound: s.file,
+    });
+  }
   const exact = await LN.checkExactNotificationSetting();
   if (exact.exact_alarm !== "granted") await LN.changeExactNotificationSetting();
 }
@@ -435,7 +465,7 @@ async function scheduleAll() {
       const base = (Math.abs(item.id) % 20000000) * 100; // Android needs 32-bit notification IDs
       let n = 0;
       const add = (when) => notifications.push({
-        id: base + n++, title: item.title, body: item.detail, channelId: "alarms",
+        id: base + n++, title: item.title, body: item.detail, channelId: channelFor(getSoundId()),
         schedule: { ...when, allowWhileIdle: true },
       });
       const hasStart = Boolean(item.startDate);
@@ -469,7 +499,12 @@ async function scheduleAll() {
   }
 }
 
-setupNotifications().then(scheduleAll).catch((error) => console.warn("Notification setup failed:", error));
+let alarmsStarted = false;
+function startAlarms() {
+  if (alarmsStarted) return;
+  alarmsStarted = true;
+  setupNotifications().then(scheduleAll).catch((error) => console.warn("Notification setup failed:", error));
+}
 
 /* ---------- Profile (Settings) ---------- */
 const palette = [
@@ -498,6 +533,10 @@ let draftPhoto = profile.photo;
 const profileModal = $("profile-modal");
 const pName = $("p-name");
 const pJob = $("p-job");
+const pSound = $("p-sound");
+pSound.innerHTML = ALARM_SOUNDS.map((sound) =>
+  `<option value="${sound.id}">${sound.label}</option>`
+).join("");
 
 function initials(name) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -521,6 +560,41 @@ function renderProfile() {
   paintAvatar($("zoomed-avatar"), profile.name, profile.color, profile.photo);
 }
 
+/* ---------- First-launch welcome ---------- */
+function needsOnboarding() {
+  try {
+    return localStorage.getItem("onboarded") === null && localStorage.getItem("profile") === null;
+  } catch {
+    return false;
+  }
+}
+
+const welcome = $("welcome");
+const wName = $("w-name");
+const wJob = $("w-job");
+const wSubmit = $("w-submit");
+
+function showWelcome() {
+  welcome.hidden = false;
+  wName.focus({ preventScroll: true });
+}
+
+wName.addEventListener("input", () => { wSubmit.disabled = !wName.value.trim(); });
+
+$("welcome-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = wName.value.trim();
+  if (!name) return;
+  profile = { name, job: wJob.value.trim(), color: profile.color, photo: profile.photo };
+  try {
+    localStorage.setItem("profile", JSON.stringify(profile));
+    localStorage.setItem("onboarded", "1");
+  } catch {}
+  renderProfile();
+  welcome.hidden = true;
+  startAlarms();
+});
+
 function renderPreview() {
   paintAvatar($("preview-avatar"), pName.value, draftColor, draftPhoto);
   $("remove-photo").hidden = !draftPhoto;
@@ -532,6 +606,7 @@ function renderPreview() {
 function openProfile() {
   pName.value = profile.name;
   pJob.value = profile.job;
+  pSound.value = getSoundId();
   draftColor = profile.color;
   draftPhoto = profile.photo;
   renderPreview();
@@ -577,11 +652,18 @@ $("profile-form").addEventListener("submit", (event) => {
   if (!name) return;
   profile = { name, job: pJob.value.trim(), color: draftColor, photo: draftPhoto };
   try { localStorage.setItem("profile", JSON.stringify(profile)); } catch {}
+  try { localStorage.setItem(SOUND_KEY, pSound.value); } catch {}
+  scheduleAll();
   renderProfile();
   closeProfile();
 });
 
 renderProfile();
+
+$("preview-sound").addEventListener("click", () => {
+  const sound = ALARM_SOUNDS.find((item) => item.id === pSound.value);
+  if (sound) new Audio("sounds/" + sound.file).play();
+});
 
 $("preview-avatar").addEventListener("click", () => $("p-photo").click());
 
@@ -615,3 +697,6 @@ $("remove-photo").addEventListener("click", () => {
   draftPhoto = "";
   renderPreview();
 });
+
+if (needsOnboarding()) showWelcome();
+else startAlarms();

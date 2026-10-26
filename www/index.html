@@ -135,6 +135,13 @@
             <label>Occupation
               <input id="p-job" maxlength="36" placeholder="What do you do?" />
             </label>
+            <label>Notification sound
+              <span class="sound-picker">
+                <span class="select-wrap"><select id="p-sound"></select></span>
+                <button type="button" class="preview-sound" id="preview-sound">Preview</button>
+              </span>
+              <small class="sound-hint">If the sound doesn't change, check this app's notification settings in Android.</small>
+            </label>
             <div class="color-picker" id="color-picker" aria-label="Avatar color"></div>
             <button class="save-event" type="submit">Save profile</button>
           </form>
@@ -149,6 +156,23 @@
           <p id="zoom-profile-job"></p>
         </section>
       </div>
+
+      <section class="welcome" id="welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" hidden>
+        <div class="welcome-card">
+          <span class="welcome-eyebrow">WELCOME</span>
+          <h1 id="welcome-title">Let's set up your profile</h1>
+          <p>Tell us a little about yourself. You can change this later in Settings.</p>
+          <form id="welcome-form">
+            <label>Your name
+              <input id="w-name" maxlength="30" placeholder="Your name" autocomplete="name" required />
+            </label>
+            <label>Occupation
+              <input id="w-job" maxlength="36" placeholder="What do you do? (optional)" />
+            </label>
+            <button class="save-event" id="w-submit" type="submit" disabled>Get started</button>
+          </form>
+        </div>
+      </section>
 
       <div class="home-indicator"></div>
     </section>
