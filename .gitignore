@@ -16,3 +16,5 @@ android/build/
 *.aab
 *.keystore
 *.jks
+
+sounds/*.zip
