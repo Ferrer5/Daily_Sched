@@ -1,3 +1,26 @@
+function showRuntimeError(error, location = "") {
+  const message = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error || "Unknown JavaScript error");
+  let banner = document.getElementById("runtime-error-banner");
+  if (!banner) {
+    banner = document.createElement("pre");
+    banner.id = "runtime-error-banner";
+    banner.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:40vh;overflow:auto;margin:0;padding:10px;background:#b91c1c;color:#fff;font:12px/1.4 monospace;white-space:pre-wrap;border-radius:8px";
+    document.body.appendChild(banner);
+  }
+  banner.textContent = `JavaScript error: ${message}${location ? `\n${location}` : ""}`;
+}
+
+window.addEventListener("error", (event) => {
+  const location = event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : "";
+  showRuntimeError(event.error || event.message, location);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  showRuntimeError(event.reason);
+});
+
 const repeatOptions = [
   { value: "once", label: "Only once" },
   { value: "daily", label: "Every day" },
@@ -115,6 +138,7 @@ const $ = (id) => document.getElementById(id);
 
 const root = document.documentElement;
 let nativeKeyboardHeight = 0;
+let baseInnerHeight = window.innerHeight;
 let focusScrollTimer = null;
 
 function setKeyboardHeight(height) {
@@ -125,13 +149,36 @@ function setKeyboardHeight(height) {
 
 function updateKeyboardHeight() {
   const viewport = window.visualViewport;
-  const measuredHeight = viewport
+  const measured = viewport
     ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
     : 0;
-  setKeyboardHeight(Math.max(measuredHeight, nativeKeyboardHeight));
+  const resizedBy = Math.max(0, baseInnerHeight - window.innerHeight);
+  const nativeRemaining = Math.max(0, nativeKeyboardHeight - resizedBy);
+  if (!nativeKeyboardHeight && measured === 0) baseInnerHeight = Math.max(baseInnerHeight, window.innerHeight);
+  setKeyboardHeight(Math.max(measured, nativeRemaining));
+}
+
+function resetPageScroll() {
+  [
+    document.scrollingElement,
+    document.documentElement,
+    document.body,
+    document.querySelector(".page"),
+    document.querySelector(".phone-shell"),
+  ].forEach((element) => {
+    if (!element) return;
+    element.scrollTop = 0;
+    element.scrollLeft = 0;
+  });
+  window.scrollTo(0, 0);
 }
 
 updateKeyboardHeight();
+window.addEventListener("resize", updateKeyboardHeight);
+window.addEventListener("orientationchange", () => {
+  baseInnerHeight = window.innerHeight;
+  updateKeyboardHeight();
+});
 window.visualViewport?.addEventListener("resize", updateKeyboardHeight);
 window.visualViewport?.addEventListener("scroll", updateKeyboardHeight);
 
@@ -149,10 +196,16 @@ document.addEventListener("focusin", (event) => {
       const formRect = form.getBoundingClientRect();
       const inputRect = element.getBoundingClientRect();
       const targetTop = form.scrollTop + inputRect.top - formRect.top - (form.clientHeight - inputRect.height) / 2;
-      form.scrollTo({ top: targetTop, behavior: "smooth" });
+      form.scrollTo({ top: targetTop, behavior: "auto" });
       return;
     }
-    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    const welcome = element.closest(".welcome");
+    if (welcome) {
+      const welcomeRect = welcome.getBoundingClientRect();
+      const inputRect = element.getBoundingClientRect();
+      const targetTop = welcome.scrollTop + inputRect.top - welcomeRect.top - (welcome.clientHeight - inputRect.height) / 2;
+      welcome.scrollTo({ top: targetTop, behavior: "auto" });
+    }
   }, 300);
 });
 
@@ -161,23 +214,39 @@ document.addEventListener("focusout", () => {
     if (document.activeElement.matches("input, select, textarea")) return;
     nativeKeyboardHeight = 0;
     setKeyboardHeight(0);
+    resetPageScroll();
   }, 0);
 });
 
-if (window.Capacitor?.isNativePlatform?.()) {
-  const capacitor = window.Capacitor;
-  const keyboard = capacitor.Plugins?.Keyboard
-    ?? (capacitor.isPluginAvailable?.("Keyboard") ? capacitor.registerPlugin?.("Keyboard") : null);
-  if (keyboard?.addListener) {
-    keyboard.addListener("keyboardWillShow", (info) => {
-      nativeKeyboardHeight = info.keyboardHeight;
-      updateKeyboardHeight();
-    }).catch((error) => console.warn("Keyboard show listener failed:", error));
-    keyboard.addListener("keyboardWillHide", () => {
-      nativeKeyboardHeight = 0;
-      updateKeyboardHeight();
-    }).catch((error) => console.warn("Keyboard hide listener failed:", error));
+try {
+  if (window.Capacitor?.isNativePlatform?.()) {
+    const capacitor = window.Capacitor;
+    const keyboard = capacitor.Plugins?.Keyboard
+      ?? (capacitor.isPluginAvailable?.("Keyboard") ? capacitor.registerPlugin?.("Keyboard") : null);
+    if (keyboard?.addListener) {
+      const listenKeyboard = (eventName, handler) => {
+        try {
+          const handle = keyboard.addListener(eventName, handler);
+          if (handle && typeof handle.catch === "function") {
+            handle.catch((error) => console.warn(`Keyboard ${eventName} listener failed:`, error));
+          }
+        } catch (error) {
+          console.warn(`Keyboard ${eventName} listener failed:`, error);
+        }
+      };
+      listenKeyboard("keyboardWillShow", (info) => {
+        nativeKeyboardHeight = info.keyboardHeight;
+        updateKeyboardHeight();
+      });
+      listenKeyboard("keyboardWillHide", () => {
+        nativeKeyboardHeight = 0;
+        updateKeyboardHeight();
+        resetPageScroll();
+      });
+    }
   }
+} catch (error) {
+  console.warn("Keyboard initialization failed:", error);
 }
 
 const els = {
@@ -424,6 +493,7 @@ function closeModal() {
   hideModeHint();
   els.modal.classList.remove("is-open");
   editingId = null;
+  resetPageScroll();
 }
 
 document.querySelectorAll("[data-icon]").forEach((element) => {
@@ -1060,6 +1130,7 @@ $("welcome-form").addEventListener("submit", (event) => {
   } catch {}
   renderProfile();
   welcome.hidden = true;
+  resetPageScroll();
   startAlarms();
 });
 
@@ -1107,6 +1178,7 @@ function closeProfile() {
   previewAudio.pause();
   previewAudio.currentTime = 0;
   profileModal.classList.remove("is-open");
+  resetPageScroll();
 }
 
 $("settings-btn").addEventListener("click", openProfile);
