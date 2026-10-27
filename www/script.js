@@ -1,3 +1,5 @@
+if (window.Capacitor?.isNativePlatform?.()) document.documentElement.classList.add("native-app");
+
 function showRuntimeError(error, location = "") {
   const message = error instanceof Error
     ? `${error.name}: ${error.message}`
@@ -48,6 +50,10 @@ const modeHelp = {
 };
 
 const STORAGE_KEY = "daily-schedule-events";
+const SHORT_UNIT_MS = { minute: 60000, hour: 3600000 };
+function isShortUnit(unit) {
+  return Object.hasOwn(SHORT_UNIT_MS, unit);
+}
 const ALARM_SOUNDS = [
   { id: "chime", label: "Chime", file: "alarm_chime.wav" },
   { id: "bell", label: "Bell", file: "alarm_bell.wav" },
@@ -275,6 +281,50 @@ const doneModal = $("done-modal");
 const doneDate = $("done-date");
 
 const monthSteps = { monthly: 1, "two-months": 2, "three-months": 3, "six-months": 6, yearly: 12 };
+const repeatEveryValues = {
+  daily: { every: 1, unit: "days" },
+  weekly: { every: 1, unit: "weeks" },
+  monthly: { every: 1, unit: "months" },
+  "two-months": { every: 2, unit: "months" },
+  "three-months": { every: 3, unit: "months" },
+  "six-months": { every: 6, unit: "months" },
+  yearly: { every: 1, unit: "years" },
+};
+const repeatEveryAllowed = {
+  minute: Array.from({ length: 99 }, (_, index) => index + 1),
+  hour: Array.from({ length: 99 }, (_, index) => index + 1),
+  days: [1],
+  weeks: [1],
+  months: [1, 2, 3, 6],
+  years: [1],
+};
+let previousRepeatEvery = 1;
+
+function syncRepeatFromEvery() {
+  const every = Number($("f-every-n").value);
+  const unit = $("f-every-unit").value;
+  if (isShortUnit(unit)) {
+    els.repeat.value = "interval";
+    return;
+  }
+  const repeat = Object.entries(repeatEveryValues).find(([, value]) => value.every === every && value.unit === unit)?.[0];
+  if (!repeat) throw new Error(`Unsupported repeat interval: ${every} ${unit}.`);
+  els.repeat.value = repeat;
+}
+
+function syncEveryFromRepeat(savedInterval = null) {
+  const interval = els.repeat.value === "interval" ? savedInterval : repeatEveryValues[els.repeat.value];
+  if (!interval) throw new Error(`Unsupported repeat value: ${els.repeat.value}.`);
+  const number = $("f-every-n");
+  const unit = $("f-every-unit");
+  number.value = String(interval.every);
+  unit.value = interval.unit;
+  const allowed = repeatEveryAllowed[unit.value];
+  number.min = String(allowed[0]);
+  number.max = String(allowed[allowed.length - 1]);
+  number.readOnly = allowed.length === 1;
+  previousRepeatEvery = interval.every;
+}
 
 function toISO(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -298,6 +348,9 @@ function addMonths(date, count) {
 }
 
 function occurrenceDate(item, n) {
+  if (item.repeat === "interval") {
+    return new Date(startAtOf(item) + (n - 1) * item.interval.every * SHORT_UNIT_MS[item.interval.unit]);
+  }
   const start = parseISO(item.startDate);
   if (item.repeat === "daily") return addDays(start, n - 1);
   if (item.repeat === "weekly" && item.repeatDays.length) {
@@ -313,8 +366,13 @@ function occurrenceDate(item, n) {
   return start;
 }
 
+function startAtOf(item) {
+  return new Date(`${item.startDate}T${item.time}:00`).getTime();
+}
+
 function isFinished(item) {
-  if (item.repeat === "dynamic") return false;
+  if (item.repeat === "dynamic") return Boolean(item.endAfter) && (item.doneCount || 0) >= item.endAfter;
+  if (item.repeat === "interval") return Boolean(item.endAfter) && Date.now() > occurrenceDate(item, item.endAfter).getTime();
   if (!item.endAfter || !item.startDate) return false;
   return toISO(new Date()) > toISO(occurrenceDate(item, item.endAfter));
 }
@@ -322,10 +380,14 @@ function isFinished(item) {
 function repeatSummary(repeat, days, endAfter = 0, interval = null) {
   let text;
   if (repeat === "dynamic") {
-    const units = { day: "day", week: "week", month: "month", year: "year" };
+    const units = { minute: "minute", hour: "hour", day: "day", week: "week", month: "month", year: "year" };
     const unit = units[interval?.unit] || "month";
     const every = Number(interval?.every) || 3;
     text = `Every ${every} ${unit}${every === 1 ? "" : "s"} · after done`;
+  } else if (repeat === "interval") {
+    const unit = interval?.unit || "minute";
+    const every = Number(interval?.every) || 1;
+    text = `Every ${every} ${unit}${every === 1 ? "" : "s"}`;
   } else if (repeat === "weekly" && days.length) {
     text = `Every week · ${days.map((day) => day.slice(0, 3)).join(", ")}`;
   } else {
@@ -340,6 +402,25 @@ function shortDate(value) {
 }
 
 function dueLabel(item) {
+  if (isShortUnit(item.interval?.unit)) {
+    const dueAt = new Date(`${item.dueDate}T${item.time}:00`).getTime();
+    const remaining = dueAt - Date.now();
+    const absolute = Math.abs(remaining);
+    if (absolute < 3600000) {
+      const minutes = Math.max(1, Math.ceil(absolute / 60000));
+      return {
+        text: remaining < 0 ? `Overdue · ${minutes} min` : `Due in ${minutes} min`,
+        overdue: remaining < 0,
+      };
+    }
+    if (absolute < 86400000) {
+      const hours = Math.max(1, Math.ceil(absolute / 3600000));
+      return {
+        text: remaining < 0 ? `Overdue · ${hours} hr` : `Due in ${hours} hr`,
+        overdue: remaining < 0,
+      };
+    }
+  }
   const due = parseISO(item.dueDate);
   const today = parseISO(toISO(new Date()));
   const daysUntilDue = Math.round((Date.UTC(due.getFullYear(), due.getMonth(), due.getDate())
@@ -375,7 +456,8 @@ function renderSchedule() {
   els.list.innerHTML = orderedSchedule.map((item) => {
     const due = item.repeat === "dynamic" ? dueLabel(item) : null;
     const startsLater = item.repeat !== "dynamic" && item.startDate > toISO(new Date());
-    const detail = item.repeat === "dynamic" ? repeatSummary(item.repeat, item.repeatDays, 0, item.interval)
+    const detail = item.repeat === "dynamic" || item.repeat === "interval"
+      ? repeatSummary(item.repeat, item.repeatDays, item.endAfter, item.interval)
       : startsLater ? `${item.detail} · Starts ${shortDate(item.startDate)}` : item.detail;
     return `
     <article class="schedule-item" data-id="${item.id}">
@@ -419,7 +501,7 @@ function setMode(mode) {
   $("dynamic-interval").hidden = mode !== "dynamic";
   $("f-due-date").required = mode === "dynamic";
   $("f-interval").required = mode === "dynamic";
-  els.endsLabel.hidden = mode === "once" || mode === "dynamic";
+  els.endsLabel.hidden = mode === "once";
 }
 
 function showScreen(name) {
@@ -470,6 +552,7 @@ function openModal(item) {
   setMode(mode);
   els.modal.classList.add("is-open");
   els.title.focus({ preventScroll: true });
+  syncEveryFromRepeat(item?.repeat === "interval" ? item.interval : null);
 }
 
 function openDoneModal(id) {
@@ -481,6 +564,24 @@ function openDoneModal(id) {
   doneDate.value = toISO(new Date());
   doneDate.max = toISO(new Date());
   doneModal.classList.add("is-open");
+}
+
+function markDynamicDoneNow(id) {
+  const completedAt = Date.now();
+  schedule = schedule.map((item) => {
+    if (item.id !== id || item.repeat !== "dynamic" || !isShortUnit(item.interval?.unit)) return item;
+    const dueAt = new Date(completedAt + item.interval.every * SHORT_UNIT_MS[item.interval.unit]);
+    return {
+      ...item,
+      doneCount: (item.doneCount || 0) + 1,
+      lastDone: toISO(new Date(completedAt)),
+      dueDate: toISO(dueAt),
+      time: `${String(dueAt.getHours()).padStart(2, "0")}:${String(dueAt.getMinutes()).padStart(2, "0")}`,
+    };
+  });
+  openMenuId = null;
+  renderSchedule();
+  scheduleAll();
 }
 
 function closeDoneModal() {
@@ -502,7 +603,8 @@ document.querySelectorAll("[data-icon]").forEach((element) => {
 
 els.repeat.innerHTML = repeatOptions
   .filter((option) => option.value !== "once")
-  .map((option) => `<option value="${option.value}">${option.label}</option>`).join("");
+  .map((option) => `<option value="${option.value}">${option.label}</option>`).join("") +
+  '<option value="interval">Interval</option>';
 els.ends.innerHTML = '<option value="0">Never</option>' +
   Array.from({ length: 19 }, (_, i) => `<option value="${i + 2}">${i + 2} times</option>`).join("");
 
@@ -706,6 +808,46 @@ makeDropdown(els.repeat);
 makeDropdown(els.ends);
 makeDropdown($("f-interval-unit"));
 
+const repeatEveryNumber = $("f-every-n");
+const repeatEveryUnit = $("f-every-unit");
+
+repeatEveryNumber.addEventListener("input", () => {
+  const allowed = repeatEveryAllowed[repeatEveryUnit.value];
+  const value = Number(repeatEveryNumber.value);
+  if (!Number.isInteger(value) || !allowed.includes(value)) {
+    const next = value > previousRepeatEvery
+      ? allowed.find((number) => number >= value) ?? allowed[allowed.length - 1]
+      : [...allowed].reverse().find((number) => number <= value) ?? allowed[0];
+    repeatEveryNumber.value = String(next);
+  }
+  previousRepeatEvery = Number(repeatEveryNumber.value);
+  syncRepeatFromEvery();
+});
+
+repeatEveryNumber.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+  event.preventDefault();
+  const allowed = repeatEveryAllowed[repeatEveryUnit.value];
+  const value = Number(repeatEveryNumber.value);
+  const next = event.key === "ArrowUp"
+    ? allowed.find((number) => number > value) ?? allowed[allowed.length - 1]
+    : [...allowed].reverse().find((number) => number < value) ?? allowed[0];
+  repeatEveryNumber.value = String(next);
+  previousRepeatEvery = next;
+  syncRepeatFromEvery();
+});
+
+repeatEveryUnit.addEventListener("change", () => {
+  const allowed = repeatEveryAllowed[repeatEveryUnit.value];
+  repeatEveryNumber.min = String(allowed[0]);
+  repeatEveryNumber.max = String(allowed[allowed.length - 1]);
+  repeatEveryNumber.readOnly = allowed.length === 1;
+  repeatEveryNumber.style.opacity = allowed.length === 1 ? ".55" : "";
+  repeatEveryNumber.value = String(allowed[0]);
+  previousRepeatEvery = allowed[0];
+  syncRepeatFromEvery();
+});
+
 document.addEventListener("click", (event) => {
   if (openCustomDropdown && !openCustomDropdown.wrapper.contains(event.target)) closeOpenDropdown();
 });
@@ -764,7 +906,9 @@ els.list.addEventListener("click", (event) => {
   } else if (action === "edit") {
     openModal(schedule.find((item) => item.id === id));
   } else if (action === "done") {
-    openDoneModal(id);
+    const item = schedule.find((entry) => entry.id === id);
+    if (item?.repeat === "dynamic" && isShortUnit(item.interval?.unit)) markDynamicDoneNow(id);
+    else openDoneModal(id);
   } else if (action === "delete") {
     schedule = schedule.filter((item) => item.id !== id);
     openMenuId = null;
@@ -789,11 +933,14 @@ els.form.addEventListener("submit", (event) => {
   const repeat = draftMode === "dynamic" ? "dynamic"
     : draftMode === "once" ? "once" : draftMode === "weekly" ? "weekly" : els.repeat.value;
   const repeatDays = draftMode === "weekly" ? [...draftDays] : [];
-  const endAfter = draftMode === "once" || draftMode === "dynamic" ? 0 : Number(els.ends.value);
+  const endAfter = draftMode === "once" ? 0 : Number(els.ends.value);
   const interval = draftMode === "dynamic"
     ? { every: Number($("f-interval").value), unit: $("f-interval-unit").value }
+    : draftMode === "repeat" && isShortUnit($("f-every-unit").value)
+      ? { every: Number($("f-every-n").value), unit: $("f-every-unit").value }
     : null;
   if (draftMode === "dynamic" && (!Number.isInteger(interval.every) || interval.every < 1 || interval.every > 99)) return;
+  if (repeat === "interval" && (!Number.isInteger(interval?.every) || interval.every < 1 || interval.every > 99)) return;
   const startDate = draftMode === "dynamic" ? undefined
     : draftMode === "repeat" ? ($("f-start-date").value || toISO(new Date())) : toISO(new Date());
   let detail = repeatSummary(repeat, repeatDays, endAfter, interval);
@@ -822,14 +969,16 @@ els.form.addEventListener("submit", (event) => {
       if (draftMode === "dynamic") {
         delete updated.startDate;
         delete updated.fireAt;
-        delete updated.endAfter;
+        updated.doneCount = item.repeat === "dynamic" ? item.doneCount ?? 0 : 0;
         updated.dueDate = dueDate;
         updated.interval = interval;
         updated.lastDone = item.repeat === "dynamic" ? item.lastDone ?? null : null;
       } else {
+        delete updated.doneCount;
         delete updated.dueDate;
-        delete updated.interval;
         delete updated.lastDone;
+        if (repeat === "interval") updated.interval = interval;
+        else delete updated.interval;
       }
       return updated;
     });
@@ -848,9 +997,12 @@ els.form.addEventListener("submit", (event) => {
       newItem.dueDate = dueDate;
       newItem.interval = interval;
       newItem.lastDone = null;
+      newItem.endAfter = endAfter;
+      newItem.doneCount = 0;
     } else {
       newItem.endAfter = endAfter;
       newItem.startDate = startDate;
+      if (repeat === "interval") newItem.interval = interval;
     }
     schedule.push(newItem);
   }
@@ -872,7 +1024,7 @@ $("done-form").addEventListener("submit", (event) => {
     const due = interval.unit === "day" ? addDays(completedOn, every)
       : interval.unit === "week" ? addDays(completedOn, every * 7)
         : addMonths(completedOn, every * (interval.unit === "year" ? 12 : 1));
-    return { ...item, lastDone: chosenDate, dueDate: toISO(due) };
+    return { ...item, doneCount: (item.doneCount || 0) + 1, lastDone: chosenDate, dueDate: toISO(due) };
   });
   renderSchedule();
   scheduleAll();
@@ -904,6 +1056,9 @@ $("schedule-date").textContent = new Intl.DateTimeFormat(undefined, {
 renderWaveform();
 renderSchedule();
 showScreen("home");
+window.setInterval(() => {
+  if (schedule.some((item) => item.repeat === "dynamic" && isShortUnit(item.interval?.unit))) renderSchedule();
+}, 30000);
 
 /* ---------- Close the 3-dot menu on outside click or scroll ---------- */
 function closeMenu() {
@@ -987,8 +1142,8 @@ async function scheduleAll() {
       const [hour, minute] = item.time.split(":").map(Number);
       const base = (Math.abs(item.id) % 20000000) * 100; // Android needs 32-bit notification IDs
       let n = 0;
-      const add = (when) => notifications.push({
-        id: base + n++, title: item.title, body: item.detail, channelId: channelFor(getSoundId()),
+      const add = (when, notificationId = base + n++) => notifications.push({
+        id: notificationId, title: item.title, body: item.detail, channelId: channelFor(getSoundId()),
         schedule: { ...when, allowWhileIdle: true },
       });
       const hasStart = Boolean(item.startDate);
@@ -1000,8 +1155,26 @@ async function scheduleAll() {
           console.warn(`Skipping alarm for ${item.title}: invalid due date.`);
           continue;
         }
-        if (dueAt > new Date()) add({ at: dueAt });
+        if (isShortUnit(item.interval?.unit)) {
+          if (dueAt > new Date()) add({ at: dueAt });
+        } else if (dueAt > new Date()) add({ at: dueAt });
         else add({ at: nextOccurrence(hour, minute), every: "day" });
+      } else if (item.repeat === "interval") {
+        const every = Number(item.interval?.every);
+        const unitMs = SHORT_UNIT_MS[item.interval?.unit];
+        const startAt = startAtOf(item);
+        if (!Number.isInteger(every) || every < 1 || !unitMs || !Number.isFinite(startAt)) {
+          console.warn(`Skipping alarm for ${item.title}: invalid interval.`);
+          continue;
+        }
+        const period = every * unitMs;
+        const firstOccurrence = Math.max(1, Math.floor((Date.now() - startAt) / period) + 2);
+        let scheduled = 0;
+        for (let occurrence = firstOccurrence; scheduled < 24; occurrence++) {
+          if (item.endAfter && occurrence > item.endAfter) break;
+          add({ at: new Date(startAt + (occurrence - 1) * period) }, base + occurrence);
+          scheduled++;
+        }
       } else if (item.repeat === "once") {
         // Remember the first ring time so reopening the app never re-arms a one-time alarm that already rang.
         if (item.fireAt === undefined) { item.fireAt = nextOccurrence(hour, minute).getTime(); changed = true; }

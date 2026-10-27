@@ -110,9 +110,28 @@
             <label id="static-start-label" hidden>Start date
               <input id="f-start-date" name="startDate" type="date" />
             </label>
-            <label id="repeat-select-label" hidden>Repeat every
-              <span class="select-wrap"><select id="f-repeat" name="repeat"></select></span>
-            </label>
+            <div id="repeat-select-label" hidden>
+              <div class="repeat-every-row">
+                <label>Repeat every
+                  <input type="number" id="f-every-n" inputmode="numeric" min="1" value="1" />
+                </label>
+                <label>Unit
+                  <span class="select-wrap">
+                    <select id="f-every-unit">
+                      <option value="minute">Minutes</option>
+                      <option value="hour">Hours</option>
+                      <option value="days">Days</option>
+                      <option value="weeks">Weeks</option>
+                      <option value="months">Months</option>
+                      <option value="years">Years</option>
+                    </select>
+                  </span>
+                </label>
+              </div>
+              <span class="select-wrap" hidden>
+                <select id="f-repeat" name="repeat" hidden aria-hidden="true"></select>
+              </span>
+            </div>
             <label id="dynamic-due-label" hidden>First due date
               <input id="f-due-date" name="dueDate" type="date" required />
             </label>
@@ -123,6 +142,8 @@
               <label for="f-interval-unit">Unit
                 <span class="select-wrap">
                   <select id="f-interval-unit" name="intervalUnit">
+                    <option value="minute">Minutes</option>
+                    <option value="hour">Hours</option>
                     <option value="day">Days</option>
                     <option value="week">Weeks</option>
                     <option value="month" selected>Months</option>
