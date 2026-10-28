@@ -150,9 +150,10 @@ html.kb-open .schedule-modal { padding: 14px; border-bottom-left-radius: 25px; b
 .schedule-modal > form::-webkit-scrollbar { display: none; }
 .schedule-modal form, .welcome form { gap: 13px; }
 .schedule-modal label, .welcome label { gap: 6px; color: #6f7b89; font-size: 10px; font-weight: 600; }
+.field-error { color: #d64545; font-size: 10px; font-weight: 400; }
 .schedule-modal input, .schedule-modal select { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #e3eaf2; border-radius: 12px; outline: none; color: #202731; background: white; font-size: 12px; }
 .repeat-every-row { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
-#f-every-n:read-only { opacity: .55; }
+#f-every-n:read-only, #f-ends-n:read-only { opacity: .55; }
 .schedule-modal input[type="date"] { width: 100%; }
 .welcome input { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #e3eaf2; border-radius: 12px; outline: none; color: #202731; background: white; font-size: 12px; }
 .welcome input:focus { border-color: #71aaf0; box-shadow: 0 0 0 3px rgba(64,149,244,.1); }

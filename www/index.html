@@ -93,6 +93,10 @@
             </label>
             <label>Time
               <input id="f-time" name="time" type="time" value="09:00" />
+              <span class="field-error" id="time-error" role="alert" hidden>Pick a future date and time.</span>
+            </label>
+            <label id="once-date-label">Date
+              <input type="date" id="f-once-date" />
             </label>
             <div class="repeat-modes" id="repeat-modes">
               <button type="button" data-mode="once" class="selected">Only once</button>
@@ -109,6 +113,7 @@
             <div class="mode-hint" id="mode-hint" role="status" hidden></div>
             <label id="static-start-label" hidden>Start date
               <input id="f-start-date" name="startDate" type="date" />
+              <span class="field-error" id="start-date-error" role="alert" hidden>Start date cannot be earlier than today.</span>
             </label>
             <div id="repeat-select-label" hidden>
               <div class="repeat-every-row">
@@ -156,9 +161,19 @@
               <legend>Repeat on</legend>
               <div id="weekly-days"></div>
             </fieldset>
-            <label id="ends-label" hidden>Stops after
-              <span class="select-wrap"><select id="f-ends" name="ends"></select></span>
-            </label>
+            <div id="ends-label" class="repeat-every-row" hidden>
+              <label for="f-ends-n">Stops after
+                <input type="number" id="f-ends-n" inputmode="numeric" min="2" max="99" />
+              </label>
+              <label>&nbsp;
+                <span class="select-wrap">
+                  <select id="f-ends-mode">
+                    <option value="never">Never</option>
+                    <option value="times">Times</option>
+                  </select>
+                </span>
+              </label>
+            </div>
             <button class="save-event" id="save-btn" type="submit">Add</button>
           </form>
         </section>
