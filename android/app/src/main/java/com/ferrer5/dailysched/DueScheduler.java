@@ -5,17 +5,23 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.util.Log;
 
+import java.text.DateFormat;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TimeZone;
 
 public class DueScheduler {
+    private static final String TAG = "DueAlarm";
+
     public static void rescheduleAll(Context context) {
         Context appContext = context.getApplicationContext();
         AlarmManager alarmManager = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (alarmManager == null) {
+            Log.e(TAG, "Cannot reschedule alarms: AlarmManager is unavailable");
             return;
         }
         // cancel every alarm whose code is in the stored set
@@ -28,7 +34,7 @@ public class DueScheduler {
                 alarmManager.cancel(pi);
                 pi.cancel();
             } catch (Exception e) {
-                // ignore
+                Log.e(TAG, "Failed to cancel previously scheduled alarm code " + code, e);
             }
         }
         // cancel notifications for old codes too? just rely on codes
@@ -60,21 +66,44 @@ public class DueScheduler {
                         intent.putExtra("k", alarm.k);
                         intent.putExtra("expectedMillis", expectedMillis);
                         PendingIntent pi = PendingIntent.getBroadcast(appContext, code, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-                        if (Build.VERSION.SDK_INT >= 31 && !alarmManager.canScheduleExactAlarms()) {
+                        boolean canScheduleExactAlarms = Build.VERSION.SDK_INT < 31 || alarmManager.canScheduleExactAlarms();
+                        String exactAlarmPermission = Build.VERSION.SDK_INT >= 31
+                                ? String.valueOf(canScheduleExactAlarms)
+                                : "not applicable";
+                        long millisFromNow = alarm.atMillis - System.currentTimeMillis();
+                        String readableTime = DateFormat.getDateTimeInstance(
+                                DateFormat.MEDIUM, DateFormat.MEDIUM).format(new Date(alarm.atMillis));
+                        Log.i(TAG, "Scheduling alarm itemId=" + item.id
+                                + " kind=" + alarm.kind
+                                + " k=" + alarm.k
+                                + " time=" + readableTime
+                                + " millisFromNow=" + millisFromNow
+                                + " canScheduleExactAlarms=" + exactAlarmPermission);
+                        if (!canScheduleExactAlarms) {
                             alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarm.atMillis, pi);
+                            Log.i(TAG, "Scheduled alarm itemId=" + item.id + " kind=" + alarm.kind
+                                    + " k=" + alarm.k + " using setAndAllowWhileIdle (inexact fallback)");
                         } else {
                             try {
                                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarm.atMillis, pi);
+                                Log.i(TAG, "Scheduled alarm itemId=" + item.id + " kind=" + alarm.kind
+                                        + " k=" + alarm.k + " using setExactAndAllowWhileIdle");
                             } catch (Exception ex) {
+                                Log.e(TAG, "setExactAndAllowWhileIdle failed for itemId=" + item.id
+                                        + " kind=" + alarm.kind + " k=" + alarm.k
+                                        + "; using setAndAllowWhileIdle fallback", ex);
                                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarm.atMillis, pi);
+                                Log.i(TAG, "Scheduled alarm itemId=" + item.id + " kind=" + alarm.kind
+                                        + " k=" + alarm.k + " using setAndAllowWhileIdle (inexact fallback)");
                             }
                         }
                     } catch (Exception e) {
-                        // skip this alarm
+                        Log.e(TAG, "Failed to schedule alarm itemId=" + item.id
+                                + " kind=" + alarm.kind + " k=" + alarm.k, e);
                     }
                 }
             } catch (Exception e) {
-                // skip this item
+                Log.e(TAG, "Failed to process alarms for itemId=" + item.id, e);
             }
         }
         DueStore.saveScheduledCodes(appContext, newCodes);
@@ -92,6 +121,7 @@ public class DueScheduler {
                     alarmManager.cancel(pi);
                     pi.cancel();
                 } catch (Exception e) {
+                    Log.e(TAG, "Failed to cancel alarm for itemId=" + id + " k=" + k, e);
                 }
             }
             try {
@@ -101,6 +131,7 @@ public class DueScheduler {
                 alarmManager.cancel(piS);
                 piS.cancel();
             } catch (Exception e) {
+                Log.e(TAG, "Failed to cancel snooze alarm for itemId=" + id, e);
             }
         }
         try {
@@ -112,6 +143,7 @@ public class DueScheduler {
                 nm.cancel(DueMath.notificationCode(id, 95));
             }
         } catch (Exception e) {
+            Log.e(TAG, "Failed to cancel notifications for itemId=" + id, e);
         }
         // update stored codes
         Set<Integer> codes = DueStore.getScheduledCodes(appContext);

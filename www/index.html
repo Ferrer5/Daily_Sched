@@ -229,6 +229,17 @@
               </div>
               <small class="sound-hint">If the sound doesn't change, check this app's notification settings in Android.</small>
             </div>
+            <div class="sound-field">
+              <span class="sound-label" id="overdue-label">Overdue reminders</span>
+              <div class="sound-dropdown" id="overdue-dropdown">
+                <button type="button" class="sound-trigger" id="overdue-trigger" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="overdue-label overdue-trigger-text">
+                  <span id="overdue-trigger-text">5</span>
+                  <span class="sound-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="sound-list" id="overdue-list" role="listbox" aria-labelledby="overdue-label" hidden></div>
+              </div>
+              <small class="sound-hint">How many times to remind you after a task is due. Reminders may arrive a few minutes late when your phone is idle.</small>
+            </div>
             <div class="color-picker" id="color-picker" aria-label="Avatar color"></div>
             <button class="save-event" type="submit">Save profile</button>
           </form>

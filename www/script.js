@@ -65,6 +65,19 @@ const ALARM_SOUNDS = [
   { id: "soft", label: "Soft", file: "alarm_soft.wav" },
 ];
 const SOUND_KEY = "alarm-sound";
+const OVERDUE_REMINDERS_KEY = "overdue-reminders";
+function getOverdueReminders() {
+  try {
+    const saved = localStorage.getItem(OVERDUE_REMINDERS_KEY);
+    if (saved === null || saved === undefined) return 5;
+    const num = Number(saved);
+    if (!Number.isInteger(num)) return 5;
+    if (num < 0 || num > 10) return 5;
+    return num;
+  } catch {
+    return 5;
+  }
+}
 function getSoundId() {
   try {
     const saved = localStorage.getItem(SOUND_KEY);
@@ -294,10 +307,10 @@ const repeatEveryValues = {
 const repeatEveryAllowed = {
   minute: Array.from({ length: 99 }, (_, index) => index + 1),
   hour: Array.from({ length: 99 }, (_, index) => index + 1),
-  days: [1],
-  weeks: [1],
-  months: [1, 2, 3, 6],
-  years: [1],
+  days: Array.from({ length: 99 }, (_, index) => index + 1),
+  weeks: Array.from({ length: 99 }, (_, index) => index + 1),
+  months: Array.from({ length: 99 }, (_, index) => index + 1),
+  years: Array.from({ length: 99 }, (_, index) => index + 1),
 };
 let previousRepeatEvery = 1;
 
@@ -309,8 +322,7 @@ function syncRepeatFromEvery() {
     return;
   }
   const repeat = Object.entries(repeatEveryValues).find(([, value]) => value.every === every && value.unit === unit)?.[0];
-  if (!repeat) throw new Error(`Unsupported repeat interval: ${every} ${unit}.`);
-  els.repeat.value = repeat;
+  els.repeat.value = repeat || "interval";
 }
 
 function syncEveryFromRepeat(savedInterval = null) {
@@ -319,7 +331,7 @@ function syncEveryFromRepeat(savedInterval = null) {
   const number = $("f-every-n");
   const unit = $("f-every-unit");
   number.value = String(interval.every);
-  unit.value = interval.unit;
+  unit.value = { day: "days", week: "weeks", month: "months", year: "years" }[interval.unit] || interval.unit;
   const allowed = repeatEveryAllowed[unit.value];
   number.min = String(allowed[0]);
   number.max = String(allowed[allowed.length - 1]);
@@ -393,6 +405,12 @@ function addMonths(date, count) {
 
 function occurrenceDate(item, n) {
   if (item.repeat === "interval") {
+    const every = Number(item.interval?.every);
+    const unit = item.interval?.unit;
+    if (unit === "day") return addDays(parseISO(item.startDate), (n - 1) * every);
+    if (unit === "week") return addDays(parseISO(item.startDate), (n - 1) * every * 7);
+    if (unit === "month") return addMonths(parseISO(item.startDate), (n - 1) * every);
+    if (unit === "year") return addMonths(parseISO(item.startDate), (n - 1) * every * 12);
     const startAt = startAtOf(item);
     const period = item.interval.every * SHORT_UNIT_MS[item.interval.unit];
     const firstFuture = startAt > Date.now()
@@ -421,7 +439,15 @@ function startAtOf(item) {
 
 function isFinished(item) {
   if (item.repeat === "dynamic") return Boolean(item.endAfter) && (item.doneCount || 0) >= item.endAfter;
-  if (item.repeat === "interval") return Boolean(item.endAfter) && Date.now() > occurrenceDate(item, item.endAfter).getTime();
+  if (item.repeat === "interval") {
+    if (!item.endAfter) return false;
+    const lastOccurrence = occurrenceDate(item, item.endAfter);
+    if (["day", "week", "month", "year"].includes(item.interval?.unit)) {
+      const [hour, minute] = item.time.split(":").map(Number);
+      lastOccurrence.setHours(hour, minute, 0, 0);
+    }
+    return Date.now() > lastOccurrence.getTime();
+  }
   if (!item.endAfter || !item.startDate) return false;
   return toISO(new Date()) > toISO(occurrenceDate(item, item.endAfter));
 }
@@ -632,13 +658,15 @@ function markDynamicDoneNow(id) {
   schedule = schedule.map((item) => {
     if (item.id !== id || item.repeat !== "dynamic" || !isShortUnit(item.interval?.unit)) return item;
     const dueAt = new Date(completedAt + item.interval.every * SHORT_UNIT_MS[item.interval.unit]);
-    return {
+    const updated = {
       ...item,
       doneCount: (item.doneCount || 0) + 1,
       lastDone: toISO(new Date(completedAt)),
       dueDate: toISO(dueAt),
       time: `${String(dueAt.getHours()).padStart(2, "0")}:${String(dueAt.getMinutes()).padStart(2, "0")}`,
     };
+    delete updated.snoozeUntil;
+    return updated;
   });
   openMenuId = null;
   renderSchedule();
@@ -948,15 +976,23 @@ endsNumber.addEventListener("blur", () => {
 });
 
 repeatEveryNumber.addEventListener("input", () => {
-  const allowed = repeatEveryAllowed[repeatEveryUnit.value];
+  if (repeatEveryNumber.value === "") return;
   const value = Number(repeatEveryNumber.value);
-  if (!Number.isInteger(value) || !allowed.includes(value)) {
-    const next = value > previousRepeatEvery
-      ? allowed.find((number) => number >= value) ?? allowed[allowed.length - 1]
-      : [...allowed].reverse().find((number) => number <= value) ?? allowed[0];
-    repeatEveryNumber.value = String(next);
-  }
-  previousRepeatEvery = Number(repeatEveryNumber.value);
+  if (!Number.isFinite(value)) return;
+  const next = Math.min(99, Math.max(1, Math.trunc(value)));
+  repeatEveryNumber.value = String(next);
+  previousRepeatEvery = next;
+  syncRepeatFromEvery();
+  applyStaticDefaults();
+});
+
+repeatEveryNumber.addEventListener("blur", () => {
+  const value = Number(repeatEveryNumber.value);
+  const next = repeatEveryNumber.value === "" || !Number.isFinite(value)
+    ? previousRepeatEvery
+    : Math.min(99, Math.max(1, Math.trunc(value)));
+  repeatEveryNumber.value = String(next);
+  previousRepeatEvery = next;
   syncRepeatFromEvery();
   applyStaticDefaults();
 });
@@ -965,7 +1001,7 @@ repeatEveryNumber.addEventListener("keydown", (event) => {
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
   event.preventDefault();
   const allowed = repeatEveryAllowed[repeatEveryUnit.value];
-  const value = Number(repeatEveryNumber.value);
+  const value = repeatEveryNumber.value === "" ? 0 : Number(repeatEveryNumber.value);
   const next = event.key === "ArrowUp"
     ? allowed.find((number) => number > value) ?? allowed[allowed.length - 1]
     : [...allowed].reverse().find((number) => number < value) ?? allowed[0];
@@ -979,8 +1015,8 @@ repeatEveryUnit.addEventListener("change", () => {
   const allowed = repeatEveryAllowed[repeatEveryUnit.value];
   repeatEveryNumber.min = String(allowed[0]);
   repeatEveryNumber.max = String(allowed[allowed.length - 1]);
-  repeatEveryNumber.readOnly = allowed.length === 1;
-  repeatEveryNumber.style.opacity = allowed.length === 1 ? ".55" : "";
+  repeatEveryNumber.readOnly = false;
+  repeatEveryNumber.style.opacity = "";
   repeatEveryNumber.value = String(allowed[0]);
   previousRepeatEvery = allowed[0];
   syncRepeatFromEvery();
@@ -1107,8 +1143,12 @@ els.form.addEventListener("submit", (event) => {
   const endAfter = draftMode === "once" ? 0 : getEndAfter();
   const interval = draftMode === "dynamic"
     ? { every: Number($("f-interval").value), unit: $("f-interval-unit").value }
-    : draftMode === "repeat" && isShortUnit($("f-every-unit").value)
-      ? { every: Number($("f-every-n").value), unit: $("f-every-unit").value }
+    : draftMode === "repeat"
+      ? {
+          every: Number($("f-every-n").value),
+          unit: { days: "day", weeks: "week", months: "month", years: "year" }[$("f-every-unit").value]
+            || $("f-every-unit").value,
+        }
     : null;
   if (draftMode === "dynamic" && (!Number.isInteger(interval.every) || interval.every < 1 || interval.every > 99)) return;
   if (repeat === "interval" && (!Number.isInteger(interval?.every) || interval.every < 1 || interval.every > 99)) return;
@@ -1133,7 +1173,7 @@ els.form.addEventListener("submit", (event) => {
   const existingItem = editingId === null ? null : schedule.find((item) => item.id === editingId);
   const isFreshInterval = existingItem?.repeat !== "interval" || (!existingItem.endAfter && endAfter)
     || existingItem.startDate !== startDate || existingItem.time !== time;
-  if (repeat === "interval" && isFreshInterval) {
+  if (repeat === "interval" && isShortUnit(interval?.unit) && isFreshInterval) {
     const period = interval.every * SHORT_UNIT_MS[interval.unit];
     const requestedStart = new Date(`${startDate}T${time}:00`).getTime();
     if (!Number.isFinite(requestedStart) || !period) return;
@@ -1175,6 +1215,7 @@ els.form.addEventListener("submit", (event) => {
         updated.dueDate = dueDate;
         updated.interval = interval;
         updated.lastDone = item.repeat === "dynamic" ? item.lastDone ?? null : null;
+        delete updated.snoozeUntil;
       } else {
         delete updated.doneCount;
         delete updated.dueDate;
@@ -1202,6 +1243,7 @@ els.form.addEventListener("submit", (event) => {
       newItem.lastDone = null;
       newItem.endAfter = endAfter;
       newItem.doneCount = 0;
+      delete newItem.snoozeUntil;
     } else {
       newItem.endAfter = endAfter;
       newItem.startDate = startDate;
@@ -1227,7 +1269,9 @@ $("done-form").addEventListener("submit", (event) => {
     const due = interval.unit === "day" ? addDays(completedOn, every)
       : interval.unit === "week" ? addDays(completedOn, every * 7)
         : addMonths(completedOn, every * (interval.unit === "year" ? 12 : 1));
-    return { ...item, doneCount: (item.doneCount || 0) + 1, lastDone: chosenDate, dueDate: toISO(due) };
+    const updated = { ...item, doneCount: (item.doneCount || 0) + 1, lastDone: chosenDate, dueDate: toISO(due) };
+    delete updated.snoozeUntil;
+    return updated;
   });
   renderSchedule();
   scheduleAll();
@@ -1292,6 +1336,10 @@ if (!isNative && "serviceWorker" in navigator) {
 
 /* ---------- Alarms (Capacitor Local Notifications, Android app only) ---------- */
 const LN = window.Capacitor?.Plugins?.LocalNotifications;
+const DueAlarms = isNative
+  ? (window.Capacitor?.Plugins?.DueAlarms || window.Capacitor?.registerPlugin?.("DueAlarms") || null)
+  : null;
+if (isNative && !DueAlarms) console.warn("DueAlarms plugin not found in JS");
 const weekdayNumber = { Sunday: 1, Monday: 2, Tuesday: 3, Wednesday: 4, Thursday: 5, Friday: 6, Saturday: 7 };
 
 async function setupNotifications() {
@@ -1332,9 +1380,75 @@ function upcomingOccurrences(item, hour, minute, limit) {
   return times;
 }
 
+async function syncDueAlarms() {
+  try {
+    if (!DueAlarms) return;
+    const items = schedule.filter(i => i.repeat === "dynamic" && !isFinished(i)).map(i => ({
+      id: i.id,
+      title: i.title,
+      detail: i.detail,
+      time: i.time,
+      dueDate: i.dueDate,
+      interval: i.interval,
+      endAfter: i.endAfter || 0,
+      doneCount: i.doneCount || 0,
+      lastDone: i.lastDone || null,
+      snoozeUntil: i.snoozeUntil || null
+    }));
+    await DueAlarms.sync({ items: JSON.stringify(items), settings: { overdueReminders: getOverdueReminders(), soundId: getSoundId() } });
+  } catch (e) {
+    console.warn("DueAlarms sync failed", e);
+  }
+}
+
+async function applyNativePatches() {
+  try {
+    if (!DueAlarms) return;
+    const res = await DueAlarms.takePatches();
+    const patchesStr = res && res.patches ? res.patches : "[]";
+    let patches = [];
+    try {
+      patches = JSON.parse(patchesStr);
+    } catch (e) {
+      patches = [];
+    }
+    if (!Array.isArray(patches) || patches.length === 0) return;
+    let changed = false;
+    schedule = schedule.map(item => {
+      if (item.repeat !== "dynamic") return item;
+      const p = patches.find(x => x && Number(x.id) === Number(item.id));
+      if (!p) return item;
+      const updated = { ...item };
+      if (p.dueDate !== undefined) updated.dueDate = p.dueDate;
+      if (p.time !== undefined) updated.time = p.time;
+      if (p.doneCount !== undefined) updated.doneCount = p.doneCount;
+      if (p.lastDone !== undefined) {
+        if (p.lastDone === null) updated.lastDone = null;
+        else updated.lastDone = p.lastDone;
+      }
+      if (p.snoozeUntil !== undefined) {
+        if (p.snoozeUntil === null || p.snoozeUntil === 0) {
+          delete updated.snoozeUntil;
+        } else {
+          updated.snoozeUntil = p.snoozeUntil;
+        }
+      }
+      changed = true;
+      return updated;
+    });
+    if (changed) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule)); } catch {}
+      renderSchedule();
+    }
+  } catch (e) {
+    console.warn("DueAlarms sync failed", e);
+  }
+}
+
 async function scheduleAll() {
   if (!isNative || !LN) return;
   try {
+    await applyNativePatches();
     const pending = await LN.getPending();
     if (pending.notifications.length) await LN.cancel({ notifications: pending.notifications });
 
@@ -1342,6 +1456,7 @@ async function scheduleAll() {
     let changed = false;
     for (const item of schedule) {
       if (isFinished(item)) continue;
+      if (item.repeat === "dynamic") continue;
       const [hour, minute] = item.time.split(":").map(Number);
       const base = (Math.abs(item.id) % 20000000) * 100; // Android needs 32-bit notification IDs
       let n = 0;
@@ -1351,20 +1466,13 @@ async function scheduleAll() {
       });
       const hasStart = Boolean(item.startDate);
 
-      if (item.repeat === "dynamic") {
-        const dueAt = parseISO(item.dueDate);
-        dueAt.setHours(hour, minute, 0, 0);
-        if (Number.isNaN(dueAt.getTime())) {
-          console.warn(`Skipping alarm for ${item.title}: invalid due date.`);
-          continue;
-        }
-        if (isShortUnit(item.interval?.unit)) {
-          if (dueAt > new Date()) add({ at: dueAt });
-        } else if (dueAt > new Date()) add({ at: dueAt });
-        else add({ at: nextOccurrence(hour, minute), every: "day" });
-      } else if (item.repeat === "interval") {
+      if (item.repeat === "interval") {
         const every = Number(item.interval?.every);
         const unitMs = SHORT_UNIT_MS[item.interval?.unit];
+        if (["day", "week", "month", "year"].includes(item.interval?.unit)) {
+          upcomingOccurrences(item, hour, minute, 24).forEach((at) => add({ at }));
+          continue;
+        }
         const startAt = startAtOf(item);
         if (!Number.isInteger(every) || every < 1 || !unitMs || !Number.isFinite(startAt)) {
           console.warn(`Skipping alarm for ${item.title}: invalid interval.`);
@@ -1406,6 +1514,7 @@ async function scheduleAll() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule)); } catch {}
     }
     if (notifications.length) await LN.schedule({ notifications });
+    try { await syncDueAlarms(); } catch (e) {}
   } catch (error) {
     console.warn("Could not schedule alarms:", error);
   }
@@ -1415,7 +1524,12 @@ let alarmsStarted = false;
 function startAlarms() {
   if (alarmsStarted) return;
   alarmsStarted = true;
-  setupNotifications().then(scheduleAll).catch((error) => console.warn("Notification setup failed:", error));
+  setupNotifications().then(async () => {
+    try { await applyNativePatches(); } catch (e) {}
+    try { if (DueAlarms && typeof DueAlarms.addListener === "function") { DueAlarms.addListener("patchesAvailable", () => { applyNativePatches(); }); } } catch (e) {}
+    try { await syncDueAlarms(); } catch (e) {}
+    await scheduleAll();
+  }).catch((error) => console.warn("Notification setup failed:", error));
 }
 
 /* ---------- Profile (Settings) ---------- */
@@ -1442,6 +1556,7 @@ try {
 let draftColor = profile.color;
 let draftPhoto = profile.photo;
 let draftSound = getSoundId();
+let draftOverdueReminders = getOverdueReminders();
 
 const profileModal = $("profile-modal");
 const pName = $("p-name");
@@ -1450,6 +1565,10 @@ const soundDropdown = $("sound-dropdown");
 const soundList = $("sound-list");
 const soundTrigger = $("sound-trigger");
 const soundTriggerText = $("sound-trigger-text");
+const overdueDropdown = $("overdue-dropdown");
+const overdueList = $("overdue-list");
+const overdueTrigger = $("overdue-trigger");
+const overdueTriggerText = $("overdue-trigger-text");
 const previewAudio = new Audio();
 
 function initials(name) {
@@ -1536,16 +1655,35 @@ function setSoundListOpen(open) {
   }
 }
 
+function renderOverdueList() {
+  if (!overdueList) return;
+  const options = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  overdueList.innerHTML = options.map((opt) => {
+    const selected = Number(draftOverdueReminders) === opt;
+    return `<div class="sound-row" role="option" tabindex="0" aria-selected="${selected}" data-overdue="${opt}"><span>${opt === 0 ? "Off" : String(opt)}</span>${selected ? `<span class="sound-icon">${icon("check", 16)}</span>` : ""}</div>`;
+  }).join("");
+}
+
+function setOverdueListOpen(open) {
+  if (!overdueList) return;
+  overdueList.hidden = !open;
+  if (overdueTrigger) overdueTrigger.setAttribute("aria-expanded", String(open));
+}
+
 function openProfile() {
   pName.value = profile.name;
   pJob.value = profile.job;
   draftSound = getSoundId();
   soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
+  draftOverdueReminders = getOverdueReminders();
+  if (overdueTriggerText) overdueTriggerText.textContent = draftOverdueReminders === 0 ? "Off" : String(draftOverdueReminders);
   setSoundListOpen(false);
+  setOverdueListOpen(false);
   draftColor = profile.color;
   draftPhoto = profile.photo;
   renderPreview();
   renderSoundList();
+  renderOverdueList();
   profileModal.classList.add("is-open");
 }
 
@@ -1573,8 +1711,13 @@ $("avatar-zoom-close").addEventListener("click", closeAvatarZoom);
 avatarZoom.addEventListener("click", (event) => { if (event.target === avatarZoom) closeAvatarZoom(); });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (!soundList.hidden) {
+    if (soundList && !soundList.hidden) {
       setSoundListOpen(false);
+      event.stopPropagation();
+      return;
+    }
+    if (overdueList && !overdueList.hidden) {
+      setOverdueListOpen(false);
       event.stopPropagation();
       return;
     }
@@ -1598,6 +1741,7 @@ $("profile-form").addEventListener("submit", (event) => {
   profile = { name, job: pJob.value.trim(), color: draftColor, photo: draftPhoto };
   try { localStorage.setItem("profile", JSON.stringify(profile)); } catch {}
   try { localStorage.setItem(SOUND_KEY, draftSound); } catch {}
+  try { localStorage.setItem(OVERDUE_REMINDERS_KEY, String(draftOverdueReminders)); } catch {}
   scheduleAll();
   renderProfile();
   closeProfile();
@@ -1638,15 +1782,50 @@ soundList.addEventListener("keydown", (event) => {
   const row = event.target.closest(".sound-row");
   if (!row || !soundList.contains(row) || !["Enter", " "].includes(event.key)) return;
   event.preventDefault();
-  draftSound = row.dataset.sound;
-  soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
-  renderSoundList();
-  playSoundPreview(draftSound);
-  setSoundListOpen(false);
+  if (row.dataset.sound) {
+    draftSound = row.dataset.sound;
+    soundTriggerText.textContent = ALARM_SOUNDS.find((sound) => sound.id === draftSound).label;
+    renderSoundList();
+    playSoundPreview(draftSound);
+    setSoundListOpen(false);
+    return;
+  }
 });
 
+if (overdueDropdown) {
+  overdueDropdown.addEventListener("click", (event) => {
+    if (event.target.closest("#overdue-trigger")) {
+      setOverdueListOpen(overdueList && overdueList.hidden);
+      return;
+    }
+    const row = event.target.closest(".sound-row");
+    if (!row || !overdueDropdown.contains(row)) return;
+    if (row.dataset.overdue !== undefined) {
+      draftOverdueReminders = Number(row.dataset.overdue);
+      if (overdueTriggerText) overdueTriggerText.textContent = draftOverdueReminders === 0 ? "Off" : String(draftOverdueReminders);
+      renderOverdueList();
+      setOverdueListOpen(false);
+    }
+  });
+}
+
+if (overdueList) {
+  overdueList.addEventListener("keydown", (event) => {
+    const row = event.target.closest(".sound-row");
+    if (!row || !overdueList.contains(row) || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (row.dataset.overdue !== undefined) {
+      draftOverdueReminders = Number(row.dataset.overdue);
+      if (overdueTriggerText) overdueTriggerText.textContent = draftOverdueReminders === 0 ? "Off" : String(draftOverdueReminders);
+      renderOverdueList();
+      setOverdueListOpen(false);
+    }
+  });
+}
+
 document.addEventListener("click", (event) => {
-  if (!soundDropdown.contains(event.target)) setSoundListOpen(false);
+  if (soundDropdown && !soundDropdown.contains(event.target)) setSoundListOpen(false);
+  if (overdueDropdown && !overdueDropdown.contains(event.target)) setOverdueListOpen(false);
 });
 
 $("preview-avatar").addEventListener("click", () => $("p-photo").click());
