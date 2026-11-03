@@ -448,7 +448,11 @@ function isFinished(item) {
     return Date.now() > lastOccurrence.getTime();
   }
   if (!item.endAfter || !item.startDate) return false;
-  return toISO(new Date()) > toISO(occurrenceDate(item, item.endAfter));
+  if (!isValidTime(item.time)) return false;
+  const last = occurrenceDate(item, item.endAfter);
+  const [hh, mm] = item.time.split(":").map(Number);
+  last.setHours(hh, mm, 0, 0);
+  return Date.now() > last.getTime();
 }
 
 function repeatSummary(repeat, days, endAfter = 0, interval = null) {
