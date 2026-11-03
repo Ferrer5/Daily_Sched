@@ -2,6 +2,7 @@ package com.ferrer5.dailysched;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Set;
 
 public class DueStore {
+    private static final String TAG = "DueStore";
     private static final String PREFS_NAME = "due_alarms";
     private static final String KEY_ITEMS = "items";
     private static final String KEY_OVERDUE_REMINDERS = "overdue_reminders";
@@ -24,7 +26,7 @@ public class DueStore {
         return context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    public static void saveItems(Context context, JSONArray itemsJson) {
+    public static synchronized void saveItems(Context context, JSONArray itemsJson) {
         if (itemsJson == null) {
             itemsJson = new JSONArray();
         }
@@ -119,7 +121,7 @@ public class DueStore {
         return obj;
     }
 
-    public static void saveItem(Context context, DueMath.Item item) {
+    public static synchronized void saveItem(Context context, DueMath.Item item) {
         try {
             JSONArray arr = getItemsJson(context);
             JSONArray newArr = new JSONArray();
@@ -139,6 +141,7 @@ public class DueStore {
             }
             saveItems(context, newArr);
         } catch (Exception e) {
+            Log.e(TAG, "Failed to save item", e);
         }
     }
 
@@ -156,7 +159,7 @@ public class DueStore {
         return null;
     }
 
-    public static void removeItem(Context context, long id) {
+    public static synchronized void removeItem(Context context, long id) {
         try {
             JSONArray arr = getItemsJson(context);
             JSONArray newArr = new JSONArray();
@@ -169,6 +172,7 @@ public class DueStore {
             }
             saveItems(context, newArr);
         } catch (Exception e) {
+            Log.e(TAG, "Failed to remove item id=" + id, e);
         }
     }
 
@@ -200,6 +204,7 @@ public class DueStore {
                 }
             }
         } catch (Exception e) {
+            Log.e(TAG, "Failed to store alarm settings", e);
         }
     }
 
@@ -226,7 +231,7 @@ public class DueStore {
         getPrefs(context).edit().putStringSet(KEY_SCHEDULED_CODES, set).apply();
     }
 
-    public static void addPatch(Context context, long id, String dueDate, String time, int doneCount, String lastDone, Long snoozeUntil) {
+    public static synchronized void addPatch(Context context, long id, String dueDate, String time, int doneCount, String lastDone, Long snoozeUntil) {
         try {
             JSONArray patches = getPatchesJson(context);
             JSONObject patch = new JSONObject();
@@ -244,9 +249,16 @@ public class DueStore {
             } else {
                 patch.put("snoozeUntil", snoozeUntil);
             }
-            patches.put(patch);
-            getPrefs(context).edit().putString(KEY_PATCHES, patches.toString()).apply();
+            // Each patch is a full snapshot, so older patches for this item are stale.
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < patches.length(); i++) {
+                JSONObject existing = patches.getJSONObject(i);
+                if (existing.optLong("id", Long.MIN_VALUE) != id) kept.put(existing);
+            }
+            kept.put(patch);
+            getPrefs(context).edit().putString(KEY_PATCHES, kept.toString()).apply();
         } catch (Exception e) {
+            Log.e(TAG, "Failed to store patch for item id=" + id, e);
         }
     }
 
@@ -274,7 +286,7 @@ public class DueStore {
         return ids;
     }
 
-    public static JSONArray takeAllPatches(Context context) {
+    public static synchronized JSONArray takeAllPatches(Context context) {
         JSONArray patches = getPatchesJson(context);
         getPrefs(context).edit().putString(KEY_PATCHES, "[]").apply();
         return patches;

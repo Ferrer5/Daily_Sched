@@ -45,14 +45,18 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                     long now = System.currentTimeMillis();
                     if ("DONE".equals(action)) {
                         item = DueMath.completed(item, now, TimeZone.getDefault());
-                        DueStore.saveItem(appContext, item);
-                        DueStore.addPatch(appContext, item.id, item.dueDate, item.time, item.doneCount, item.lastDone, item.snoozeUntil == 0 ? null : item.snoozeUntil);
+                        synchronized (DueStore.class) {
+                            DueStore.saveItem(appContext, item);
+                            DueStore.addPatch(appContext, item.id, item.dueDate, item.time, item.doneCount, item.lastDone, item.snoozeUntil == 0 ? null : item.snoozeUntil);
+                        }
                         Log.i(TAG, "Notification action completed itemId=" + itemId
                                 + " doneCount=" + item.doneCount + " lastDone=" + item.lastDone);
                     } else if ("SNOOZE".equals(action)) {
                         item = DueMath.snoozed(item, now);
-                        DueStore.saveItem(appContext, item);
-                        DueStore.addPatch(appContext, item.id, item.dueDate, item.time, item.doneCount, item.lastDone, item.snoozeUntil == 0 ? null : item.snoozeUntil);
+                        synchronized (DueStore.class) {
+                            DueStore.saveItem(appContext, item);
+                            DueStore.addPatch(appContext, item.id, item.dueDate, item.time, item.doneCount, item.lastDone, item.snoozeUntil == 0 ? null : item.snoozeUntil);
+                        }
                         Log.i(TAG, "Notification action snoozed itemId=" + itemId
                                 + " snoozeUntil=" + item.snoozeUntil);
                     } else {

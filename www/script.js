@@ -86,11 +86,7 @@ function getSoundId() {
   return "chime";
 }
 const channelFor = (soundId) => `alarm_${soundId}`;
-const defaultSchedule = [
-  { id: 1, time: "09:30", title: "Design review", detail: "Homepage exploration", duration: "45 min", accent: "blue-accent", repeat: "once", repeatDays: [] },
-  { id: 2, time: "12:00", title: "Team lunch", detail: "Terrace café", duration: "1 hr", accent: "orange-accent", repeat: "once", repeatDays: [] },
-  { id: 3, time: "15:30", title: "Product sync", detail: "Weekly planning", duration: "30 min", accent: "purple-accent", repeat: "weekly", repeatDays: ["Monday"] },
-];
+const defaultSchedule = [];
 
 function loadSchedule() {
   try {
@@ -136,6 +132,8 @@ const iconPaths = {
   more: '<circle cx="12" cy="5" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>',
   edit: '<path d="m14 5 5 5M4 20l3.5-.7L19 7.8a1.8 1.8 0 0 0 0-2.6l-.2-.2a1.8 1.8 0 0 0-2.6 0L4.7 16.5 4 20Z"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
 };
 
 function icon(name, size = 20) {
@@ -317,6 +315,7 @@ let previousRepeatEvery = 1;
 function syncRepeatFromEvery() {
   const every = Number($("f-every-n").value);
   const unit = $("f-every-unit").value;
+  $("short-interval-warning").hidden = !["minute", "hour"].includes(unit);
   if (isShortUnit(unit)) {
     els.repeat.value = "interval";
     return;
@@ -338,6 +337,7 @@ function syncEveryFromRepeat(savedInterval = null) {
   number.readOnly = allowed.length === 1;
   previousRepeatEvery = interval.every;
   refreshCustomDropdowns();
+  $("short-interval-warning").hidden = !["minute", "hour"].includes(unit.value);
 }
 
 function toISO(date) {
@@ -413,10 +413,7 @@ function occurrenceDate(item, n) {
     if (unit === "year") return addMonths(parseISO(item.startDate), (n - 1) * every * 12);
     const startAt = startAtOf(item);
     const period = item.interval.every * SHORT_UNIT_MS[item.interval.unit];
-    const firstFuture = startAt > Date.now()
-      ? startAt
-      : startAt + Math.ceil((Date.now() - startAt) / period) * period;
-    return new Date(firstFuture + (n - 1) * period);
+    return new Date(startAt + (n - 1) * period);
   }
   const start = parseISO(item.startDate);
   if (item.repeat === "daily") return addDays(start, n - 1);
@@ -438,9 +435,11 @@ function startAtOf(item) {
 }
 
 function isFinished(item) {
+  if (item.repeat === "once" && Number.isFinite(item.fireAt)) return Date.now() > item.fireAt + 60000;
   if (item.repeat === "dynamic") return Boolean(item.endAfter) && (item.doneCount || 0) >= item.endAfter;
   if (item.repeat === "interval") {
     if (!item.endAfter) return false;
+    if (!isValidTime(item.time)) return false;
     const lastOccurrence = occurrenceDate(item, item.endAfter);
     if (["day", "week", "month", "year"].includes(item.interval?.unit)) {
       const [hour, minute] = item.time.split(":").map(Number);
@@ -527,34 +526,109 @@ function renderSchedule() {
   }
   const visibleSchedule = schedule.filter((item) => !isFinished(item));
   els.count.textContent = `${visibleSchedule.length} ${visibleSchedule.length === 1 ? "task" : "tasks"}`;
-  const orderedSchedule = [...visibleSchedule].sort((first, second) => second.id - first.id);
-  els.list.innerHTML = orderedSchedule.map((item) => {
-    const due = item.repeat === "dynamic" ? dueLabel(item) : null;
-    const startsLater = item.repeat !== "dynamic" && item.startDate > toISO(new Date());
-    const detail = item.repeat === "dynamic" || item.repeat === "interval"
-      ? repeatSummary(item.repeat, item.repeatDays, item.endAfter, item.interval)
-      : startsLater ? `${item.detail} · Starts ${shortDate(item.startDate)}` : item.detail;
-    return `
-    <article class="schedule-item" data-id="${item.id}">
-      <time>${escapeHtml(formatTime(item.time))}</time>
-      <span class="schedule-accent ${item.accent}"></span>
-      <span class="schedule-copy">
-        <strong>${escapeHtml(item.title)}</strong>
-        <small>${escapeHtml(detail)}</small>
-      </span>
-      <span class="schedule-duration ${due ? `due-label${due.overdue ? " overdue-label" : ""}` : ""}">${escapeHtml(due ? due.text : item.duration)}</span>
-      ${item.repeat === "dynamic" ? `<button class="mark-done-button" type="button" data-action="done" aria-label="Mark ${escapeHtml(item.title)} done">${icon("check", 15)}</button>` : "<span></span>"}
-      <div class="event-menu-wrap">
-        <button class="event-menu-trigger" type="button" data-action="menu" aria-label="More options for ${escapeHtml(item.title)}" aria-expanded="${openMenuId === item.id}">${icon("more", 18)}</button>
-        ${openMenuId === item.id ? `
-          <div class="event-menu" role="menu">
-            ${item.repeat === "dynamic" ? `<button type="button" role="menuitem" data-action="done">${icon("check", 15)}Mark done</button>` : ""}
-            <button type="button" role="menuitem" data-action="edit">${icon("edit", 15)}Edit</button>
-            <button class="delete-option" type="button" role="menuitem" data-action="delete">${icon("trash", 15)}Delete</button>
-          </div>` : ""}
+  const { hero, otherOverdueCount } = pickHero(visibleSchedule);
+  const now = Date.now();
+  const heroAt = hero ? nextEventAt(hero) : null;
+  const heroUrgency = hero ? urgencyOf(hero, now) : null;
+  const heroIsSnoozed = hero?.repeat === "dynamic" && hero.snoozeUntil > now;
+  const heroIsToday = heroAt !== null && (heroUrgency === "overdue"
+    || new Date(heroAt).toDateString() === new Date(now).toDateString());
+  let heroMarkup;
+  if (hero && heroIsToday) {
+    const timeLabel = heroIsSnoozed
+      ? `Snoozed · back ${relativeText(heroAt, now)}`
+      : heroUrgency === "overdue"
+        ? `Overdue · was ${formatTime(hero.time)}`
+        : `Next up · ${formatTime(hero.time)}`;
+    const difference = heroAt - now;
+    const countdownSeconds = Math.ceil(difference / 1000);
+    const countText = heroUrgency === "overdue"
+      ? relativeText(heroAt, now)
+      : difference > 0 && difference < 10 * 60000
+        ? `${Math.floor(countdownSeconds / 60)}:${String(countdownSeconds % 60).padStart(2, "0")}`
+        : relativeText(heroAt, now);
+    const isNumericCountdown = difference > 0 && difference < 10 * 60000;
+    const countdownColor = heroUrgency === "overdue" ? "#d65353"
+      : isNumericCountdown ? "#4095f4"
+        : heroUrgency === "soon" ? "#f3a34f" : "#667383";
+    const intervalText = hero.repeat === "dynamic" || hero.repeat === "interval"
+      ? shortInterval(hero.interval)
+      : shortInterval(hero.repeat);
+    const hasProgress = hero.repeat === "dynamic" && hero.endAfter > 0;
+    const doneCount = Math.min(hero.doneCount || 0, hero.endAfter || 0);
+    const canSnooze = hero.repeat === "dynamic" && !heroIsSnoozed && heroAt <= now;
+    const actionMarkup = hero.repeat === "dynamic"
+      ? `<div class="hero-actions">
+          <button class="hero-done" type="button" data-action="done">${icon("check", 15)}Mark done</button>
+          ${canSnooze ? `<button class="hero-snooze" type="button" data-action="snooze">Snooze 10 min</button>` : ""}
+        </div>`
+      : "";
+    heroMarkup = `<article class="hero-card${heroUrgency === "overdue" ? " is-overdue" : ""}" data-id="${hero.id}">
+      <div class="hero-label${heroUrgency === "overdue" ? " is-alert" : heroIsSnoozed ? " is-snoozed" : ""}">${escapeHtml(timeLabel)}</div>
+      <div class="hero-title-row">
+        <h3>${escapeHtml(hero.title)}</h3>
+        <span class="hero-count" data-at="${heroAt}" data-urgency="${heroUrgency}" data-snoozed="${heroIsSnoozed}" role="timer" aria-live="off" style="color:${countdownColor}">${escapeHtml(countText)}</span>
       </div>
+      ${intervalText ? `<div class="hero-meta">${icon("repeat", 13)}<span>every ${escapeHtml(intervalText)}</span>${hasProgress ? `<span class="hero-progress-copy"> · ${doneCount} of ${hero.endAfter} done</span>` : ""}</div>` : ""}
+      ${hasProgress ? `<div class="hero-progress"><span style="width:${Math.min(100, doneCount / hero.endAfter * 100)}%"></span></div>` : ""}
+      ${actionMarkup}
+      ${otherOverdueCount > 0 ? `<div class="hero-more-overdue">+${otherOverdueCount} more overdue</div>` : ""}
     </article>`;
+  } else if (hero) {
+    heroMarkup = `<article class="hero-empty"><strong>Nothing due today</strong><span>Next: ${escapeHtml(hero.title)} · ${escapeHtml(relativeText(heroAt, now))}</span></article>`;
+  } else {
+    heroMarkup = `<article class="hero-empty"><strong>Nothing due today</strong>${visibleSchedule.length ? "" : "<span>Add your first schedule</span>"}</article>`;
+  }
+  const groupedSchedule = groupSchedule(visibleSchedule, hero);
+  const groupOrder = [
+    ["overdue", "Overdue"],
+    ["soon", "Due soon"],
+    ["today", "Later today"],
+    ["later", "Upcoming"],
+  ];
+  const groupsMarkup = groupOrder.map(([key, label]) => {
+    const items = groupedSchedule[key];
+    if (items.length === 0) return "";
+    return `<section class="schedule-group${key === "overdue" ? " is-overdue" : ""}">
+      <h3 class="schedule-group-heading">${label}<span>${items.length}</span></h3>
+      <div class="schedule-group-card">${items.map((item) => {
+        const at = nextEventAt(item);
+        const urgency = urgencyOf(item, now);
+        const startsLater = item.startDate && item.startDate > toISO(new Date());
+        const isOnce = item.repeat === "once";
+        const repeatText = item.repeat === "dynamic" || item.repeat === "interval"
+          ? shortInterval(item.interval)
+          : shortInterval(item.repeat);
+        const secondLine = isOnce
+          ? `${icon("bell", 13)}<span>once</span>`
+          : `${icon("repeat", 13)}<span>${escapeHtml(repeatText || "repeat")}</span>`;
+        const detail = `${secondLine}${item.repeat === "dynamic" && item.endAfter > 0
+          ? `<span class="sched-row-count"> · ${Math.min(item.doneCount || 0, item.endAfter)} of ${item.endAfter}</span>` : ""}${startsLater
+          ? `<span class="sched-row-starts"> · Starts ${escapeHtml(shortDate(item.startDate))}</span>` : ""}`;
+        const dueText = at === null ? "No time set" : relativeText(at, now);
+        return `<div class="sched-row" data-id="${item.id}">
+          <time>${at === null ? "--:--" : escapeHtml(formatTime(item.time))}</time>
+          <div class="sched-row-copy">
+            <strong>${escapeHtml(item.title)}</strong>
+            <small>${detail}</small>
+          </div>
+          <span class="sched-row-relative${urgency === "overdue" ? " is-overdue" : urgency === "soon" ? " is-soon" : ""}">${escapeHtml(dueText)}</span>
+          ${item.repeat === "dynamic"
+            ? `<button class="mark-done-button" type="button" data-action="done" aria-label="Mark ${escapeHtml(item.title)} done">${icon("check", 15)}</button>`
+            : "<span class=\"sched-row-action-spacer\"></span>"}
+          <div class="event-menu-wrap">
+            <button class="event-menu-trigger" type="button" data-action="menu" aria-label="More options for ${escapeHtml(item.title)}" aria-expanded="${openMenuId === item.id}">${icon("more", 18)}</button>
+            ${openMenuId === item.id ? `<div class="event-menu" role="menu">
+              ${item.repeat === "dynamic" ? `<button type="button" role="menuitem" data-action="done">${icon("check", 15)}Mark done</button>` : ""}
+              <button type="button" role="menuitem" data-action="edit">${icon("edit", 15)}Edit</button>
+              <button class="delete-option" type="button" role="menuitem" data-action="delete">${icon("trash", 15)}Delete</button>
+            </div>` : ""}
+          </div>
+        </div>`;
+      }).join("")}</div>
+    </section>`;
   }).join("");
+  els.list.innerHTML = heroMarkup + groupsMarkup;
 }
 
 function renderWeekly() {
@@ -567,6 +641,7 @@ function renderWeekly() {
 function setMode(mode) {
   closeOpenDropdown();
   draftMode = mode;
+  $("short-interval-warning").hidden = mode !== "repeat" || !["minute", "hour"].includes($("f-every-unit").value);
   hideModeHint();
   els.modes.querySelectorAll("button").forEach((button) => button.classList.toggle("selected", button.dataset.mode === mode));
   els.repeatLabel.hidden = mode !== "repeat";
@@ -612,7 +687,9 @@ function openModal(item) {
   els.time.value = item ? item.time : toHHMM(new Date());
   const today = todayISO();
   const onceDate = $("f-once-date");
-  onceDate.value = item?.repeat === "once" ? item.startDate || today : today;
+  onceDate.value = item?.repeat === "once"
+    ? item.startDate || (Number.isFinite(item.fireAt) ? toISO(new Date(item.fireAt)) : today)
+    : today;
   if (item?.repeat === "once") onceDate.removeAttribute("min");
   else onceDate.min = today;
   $("f-start-date").value = item?.startDate || today;
@@ -1020,7 +1097,6 @@ repeatEveryUnit.addEventListener("change", () => {
   repeatEveryNumber.value = String(allowed[0]);
   previousRepeatEvery = allowed[0];
   syncRepeatFromEvery();
-  userEditedTime = false;
   userEditedDate = false;
   applyStaticDefaults();
 });
@@ -1038,7 +1114,6 @@ dynamicEveryNumber.addEventListener("keydown", (event) => {
 });
 
 dynamicEveryUnit.addEventListener("change", () => {
-  userEditedTime = false;
   userEditedDueDate = false;
   applyDynamicDefaults();
 });
@@ -1088,7 +1163,7 @@ els.modal.addEventListener("click", (event) => {
 
 els.list.addEventListener("click", (event) => {
   const actionElement = event.target.closest("[data-action]");
-  const card = event.target.closest(".schedule-item");
+  const card = event.target.closest("[data-id]");
   if (!actionElement || !card) {
     if (openMenuId !== null) { openMenuId = null; renderSchedule(); }
     return;
@@ -1104,6 +1179,8 @@ els.list.addEventListener("click", (event) => {
     const item = schedule.find((entry) => entry.id === id);
     if (item?.repeat === "dynamic" && isShortUnit(item.interval?.unit)) markDynamicDoneNow(id);
     else openDoneModal(id);
+  } else if (action === "snooze") {
+    snoozeDynamic(id);
   } else if (action === "delete") {
     schedule = schedule.filter((item) => item.id !== id);
     openMenuId = null;
@@ -1134,6 +1211,11 @@ els.form.addEventListener("input", (event) => {
 
 els.form.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (!els.time.value) {
+    timeError.textContent = "Pick a time.";
+    timeError.hidden = false;
+    return;
+  }
   const title = els.title.value.trim();
   if (!title) return;
 
@@ -1162,15 +1244,22 @@ els.form.addEventListener("submit", (event) => {
     startDateError.hidden = false;
     return;
   }
+  const existingItem = editingId === null ? null : schedule.find((item) => item.id === editingId);
   let fireAt;
   if (repeat === "once") {
-    fireAt = new Date(`${startDate}T${time}:00`).getTime();
-    if (!Number.isFinite(fireAt) || fireAt <= Date.now()) {
-      timeError.hidden = false;
-      return;
+    const existingOnceDate = existingItem?.startDate
+      || (Number.isFinite(existingItem?.fireAt) ? toISO(new Date(existingItem.fireAt)) : startDate);
+    if (existingItem?.repeat === "once" && time === existingItem.time && onceDate.value === existingOnceDate) {
+      fireAt = existingItem.fireAt;
+    } else {
+      fireAt = new Date(`${startDate}T${time}:00`).getTime();
+      if (!Number.isFinite(fireAt) || fireAt <= Date.now()) {
+        timeError.textContent = "Pick a future date and time.";
+        timeError.hidden = false;
+        return;
+      }
     }
   }
-  const existingItem = editingId === null ? null : schedule.find((item) => item.id === editingId);
   const isFreshInterval = existingItem?.repeat !== "interval" || (!existingItem.endAfter && endAfter)
     || existingItem.startDate !== startDate || existingItem.time !== time;
   if (repeat === "interval" && isShortUnit(interval?.unit) && isFreshInterval) {
@@ -1304,8 +1393,33 @@ renderWaveform();
 renderSchedule();
 showScreen("home");
 window.setInterval(() => {
-  if (schedule.some((item) => item.repeat === "dynamic" && isShortUnit(item.interval?.unit))) renderSchedule();
+  if (!document.hidden && schedule.some((item) => !isFinished(item))) renderSchedule();
 }, 30000);
+window.setInterval(() => {
+  if (document.hidden) return;
+  const counter = document.querySelector(".hero-count");
+  if (!counter) return;
+  const card = counter.closest(".hero-card");
+  const item = schedule.find((entry) => String(entry.id) === card?.dataset.id);
+  if (!item) return;
+  const now = Date.now();
+  const at = nextEventAt(item);
+  if (at === null || at !== Number(counter.dataset.at) || urgencyOf(item, now) !== counter.dataset.urgency
+      || (item.snoozeUntil > now) !== (counter.dataset.snoozed === "true")) {
+    renderSchedule();
+    return;
+  }
+  const difference = at - now;
+  if (Math.abs(difference) > 10 * 60000) return;
+  if (difference <= 0) {
+    counter.textContent = relativeText(at, now);
+    return;
+  }
+  const countdownSeconds = Math.ceil(difference / 1000);
+  const minutes = Math.floor(countdownSeconds / 60);
+  const seconds = countdownSeconds % 60;
+  counter.textContent = `${minutes}:${String(seconds).padStart(2, "0")}`;
+}, 1000);
 
 /* ---------- Close the 3-dot menu on outside click or scroll ---------- */
 function closeMenu() {
@@ -1368,9 +1482,15 @@ function nextOccurrence(hour, minute) {
   return date;
 }
 
+function isValidTime(value) {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 // Future ring times for events that have a start date, using the existing occurrenceDate() rules.
 function upcomingOccurrences(item, hour, minute, limit) {
   const times = [];
+  if (!isValidTime(item.time) || !Number.isInteger(hour) || hour < 0 || hour > 23
+      || !Number.isInteger(minute) || minute < 0 || minute > 59) return times;
   const max = item.endAfter || 400;
   for (let n = 1; n <= max && times.length < limit; n++) {
     const when = occurrenceDate(item, n);
@@ -1378,6 +1498,132 @@ function upcomingOccurrences(item, hour, minute, limit) {
     if (when > new Date()) times.push(when);
   }
   return times;
+}
+
+function nextEventAt(item) {
+  if (!isValidTime(item.time)) return null;
+  if (isFinished(item)) return null;
+  const [hour, minute] = item.time.split(":").map(Number);
+  if (item.repeat === "once") {
+    if (Number.isFinite(item.fireAt)) return item.fireAt;
+    return item.startDate ? startAtOf(item) : nextOccurrence(hour, minute).getTime();
+  }
+  if (item.repeat === "dynamic") {
+    if (item.snoozeUntil > Date.now()) return item.snoozeUntil;
+    return new Date(`${item.dueDate}T${item.time}:00`).getTime();
+  }
+  const hasStart = Boolean(item.startDate);
+  if (item.repeat === "interval" && ["minute", "hour"].includes(item.interval?.unit) && hasStart) {
+    const every = Number(item.interval.every);
+    const startAt = startAtOf(item);
+    const period = every * SHORT_UNIT_MS[item.interval.unit];
+    if (Number.isInteger(every) && every > 0 && Number.isFinite(startAt) && Number.isFinite(period) && period > 0) {
+      const occurrence = Math.max(1, Math.floor((Date.now() - startAt) / period) + 2);
+      return startAt + (occurrence - 1) * period;
+    }
+  }
+  const next = hasStart
+    ? upcomingOccurrences(item, hour, minute, 1)[0]
+    : nextOccurrence(hour, minute);
+  return next ? next.getTime() : nextOccurrence(hour, minute).getTime();
+}
+
+function urgencyOf(item, now = Date.now()) {
+  let at = nextEventAt(item);
+  if (at === null) return "later";
+  if (item.repeat === "dynamic" && item.snoozeUntil <= now && item.snoozeUntil > Date.now()) {
+    at = new Date(`${item.dueDate}T${item.time}:00`).getTime();
+  }
+  if (item.repeat === "dynamic" && at < now && !(item.snoozeUntil > now)) return "overdue";
+  if (at >= now && at - now <= 60 * 60000) return "soon";
+  const eventDate = new Date(at);
+  const currentDate = new Date(now);
+  if (eventDate.getFullYear() === currentDate.getFullYear()
+      && eventDate.getMonth() === currentDate.getMonth()
+      && eventDate.getDate() === currentDate.getDate()) return "today";
+  return "later";
+}
+
+function pickHero(items) {
+  const withTimes = items
+    .map((item) => ({ item, at: nextEventAt(item) }))
+    .filter(({ at }) => at !== null);
+  const overdue = withTimes
+    .filter(({ item, at }) => item.repeat === "dynamic" && urgencyOf(item) === "overdue")
+    .sort((first, second) => first.at - second.at);
+  if (overdue.length) {
+    return { hero: overdue[0].item, otherOverdueCount: overdue.length - 1 };
+  }
+  withTimes.sort((first, second) => first.at - second.at);
+  return { hero: withTimes[0]?.item || null, otherOverdueCount: 0 };
+}
+
+function groupSchedule(items, hero) {
+  const groups = { overdue: [], soon: [], today: [], later: [] };
+  const groupedItems = Object.fromEntries(Object.keys(groups).map((key) => [key, []]));
+  const now = Date.now();
+  for (const item of items) {
+    if (item === hero || isFinished(item)) continue;
+    const at = nextEventAt(item);
+    const urgency = Number.isFinite(at) ? urgencyOf(item, now) : "later";
+    const group = groups[urgency] ? urgency : "later";
+    groupedItems[group].push({ item, at: Number.isFinite(at) ? at : Number.POSITIVE_INFINITY });
+  }
+  for (const key of Object.keys(groups)) {
+    groupedItems[key].sort((first, second) => first.at - second.at);
+    groups[key] = groupedItems[key].map(({ item }) => item);
+  }
+  return groups;
+}
+
+function relativeText(atMs, now = Date.now()) {
+  const difference = atMs - now;
+  const absolute = Math.abs(difference);
+  if (absolute < 60 * 60000) {
+    const minutes = Math.max(1, Math.ceil(absolute / 60000));
+    return difference < 0 ? `${minutes} min late` : `in ${minutes} min`;
+  }
+  if (absolute < 24 * 3600000) {
+    const hours = Math.max(1, Math.ceil(absolute / 3600000));
+    return difference < 0 ? `${hours} hr late` : `in ${hours} hr`;
+  }
+  const target = new Date(atMs);
+  const current = new Date(now);
+  const targetDay = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  const currentDay = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
+  const daysAway = Math.round((targetDay - currentDay) / 86400000);
+  if (daysAway === 1) return "tomorrow";
+  if (daysAway > 1 && daysAway < 7) return `in ${daysAway} days`;
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(target);
+}
+
+function shortInterval(interval) {
+  const presetUnits = {
+    daily: "day",
+    weekly: "week",
+    monthly: "month",
+    "two-months": "2 months",
+    "three-months": "3 months",
+    "six-months": "6 months",
+    yearly: "year",
+  };
+  if (typeof interval === "string") return presetUnits[interval] || null;
+  const repeat = interval?.repeat;
+  if (repeat && presetUnits[repeat]) return presetUnits[repeat];
+  const value = interval?.interval || interval;
+  const every = Number(value?.every);
+  const unit = value?.unit;
+  if (!Number.isInteger(every) || every < 1 || !unit) return null;
+  const shortUnit = { minute: "min", hour: "hr" }[unit];
+  return `${every} ${shortUnit || unit}${shortUnit || every === 1 ? "" : "s"}`;
+}
+
+function snoozeDynamic(id) {
+  const item = schedule.find((entry) => entry.id === id && entry.repeat === "dynamic");
+  if (!item) return;
+  item.snoozeUntil = Date.now() + 10 * 60000;
+  renderSchedule();
+  scheduleAll();
 }
 
 async function syncDueAlarms() {
@@ -1416,7 +1662,13 @@ async function applyNativePatches() {
     let changed = false;
     schedule = schedule.map(item => {
       if (item.repeat !== "dynamic") return item;
-      const p = patches.find(x => x && Number(x.id) === Number(item.id));
+      let p = null;
+      for (let i = patches.length - 1; i >= 0; i--) {
+        if (patches[i] && Number(patches[i].id) === Number(item.id)) {
+          p = patches[i];
+          break;
+        }
+      }
       if (!p) return item;
       const updated = { ...item };
       if (p.dueDate !== undefined) updated.dueDate = p.dueDate;
@@ -1445,18 +1697,19 @@ async function applyNativePatches() {
   }
 }
 
-async function scheduleAll() {
+async function scheduleAllImpl() {
   if (!isNative || !LN) return;
   try {
     await applyNativePatches();
-    const pending = await LN.getPending();
-    if (pending.notifications.length) await LN.cancel({ notifications: pending.notifications });
-
     const notifications = [];
     let changed = false;
     for (const item of schedule) {
       if (isFinished(item)) continue;
       if (item.repeat === "dynamic") continue;
+      if (!isValidTime(item.time)) {
+        console.warn(`Skipping alarm for ${item.title}: invalid time.`);
+        continue;
+      }
       const [hour, minute] = item.time.split(":").map(Number);
       const base = (Math.abs(item.id) % 20000000) * 100; // Android needs 32-bit notification IDs
       let n = 0;
@@ -1483,7 +1736,7 @@ async function scheduleAll() {
         let scheduled = 0;
         for (let occurrence = firstOccurrence; scheduled < 24; occurrence++) {
           if (item.endAfter && occurrence > item.endAfter) break;
-          add({ at: new Date(startAt + (occurrence - 1) * period) }, base + occurrence);
+          add({ at: new Date(startAt + (occurrence - 1) * period) });
           scheduled++;
         }
       } else if (item.repeat === "once") {
@@ -1510,14 +1763,57 @@ async function scheduleAll() {
         else add({ at: nextOccurrence(hour, minute), every: item.repeat === "yearly" ? "year" : "month" });
       }
     }
+    const validNotifications = notifications.filter((notification) => {
+      const trigger = notification.schedule;
+      let valid;
+      if (trigger.at !== undefined) {
+        valid = trigger.at instanceof Date && Number.isFinite(trigger.at.getTime());
+      } else if (trigger.on) {
+        const { day, hour, minute, month, weekday, year } = trigger.on;
+        valid = Object.keys(trigger.on).length > 0
+          && (day === undefined || Number.isInteger(day) && day >= 1 && day <= 31)
+          && (hour === undefined || Number.isInteger(hour) && hour >= 0 && hour <= 23)
+          && (minute === undefined || Number.isInteger(minute) && minute >= 0 && minute <= 59)
+          && (month === undefined || Number.isInteger(month) && month >= 1 && month <= 12)
+          && (weekday === undefined || Number.isInteger(weekday) && weekday >= 1 && weekday <= 7)
+          && (year === undefined || Number.isInteger(year) && year > 0);
+      } else {
+        const count = trigger.count === undefined ? 1 : trigger.count;
+        valid = ["year", "month", "two-weeks", "week", "day", "hour", "minute", "second"].includes(trigger.every)
+          && Number.isInteger(count) && count > 0;
+      }
+      if (!valid) console.warn(`Skipping alarm for ${notification.title}: invalid schedule.`);
+      return valid;
+    });
     if (changed) {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule)); } catch {}
     }
-    if (notifications.length) await LN.schedule({ notifications });
+    const pending = await LN.getPending();
+    if (pending.notifications.length) await LN.cancel({ notifications: pending.notifications });
+    if (validNotifications.length) {
+      try {
+        await LN.schedule({ notifications: validNotifications });
+      } catch (error) {
+        console.warn("Could not schedule alarm batch; retrying individually:", error);
+        for (const notification of validNotifications) {
+          try {
+            await LN.schedule({ notifications: [notification] });
+          } catch (individualError) {
+            console.warn(`Could not schedule alarm for ${notification.title}:`, individualError);
+          }
+        }
+      }
+    }
     try { await syncDueAlarms(); } catch (e) {}
   } catch (error) {
     console.warn("Could not schedule alarms:", error);
   }
+}
+
+let schedChain = Promise.resolve();
+function scheduleAll() {
+  schedChain = schedChain.then(scheduleAllImpl, scheduleAllImpl);
+  return schedChain;
 }
 
 let alarmsStarted = false;

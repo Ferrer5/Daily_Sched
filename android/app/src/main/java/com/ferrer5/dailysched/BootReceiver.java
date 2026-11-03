@@ -3,8 +3,11 @@ package com.ferrer5.dailysched;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.util.Log;
 
 public class BootReceiver extends BroadcastReceiver {
+    private static final String TAG = "BootReceiver";
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null) return;
@@ -16,7 +19,7 @@ public class BootReceiver extends BroadcastReceiver {
             try {
                 DueScheduler.rescheduleAll(context.getApplicationContext());
             } catch (Exception e) {
-                // ignore
+                Log.e(TAG, "Failed to reschedule alarms after system event " + action, e);
             }
         }
     }

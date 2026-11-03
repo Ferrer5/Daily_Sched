@@ -92,7 +92,7 @@
               <input id="f-title" name="title" placeholder="Enter your to-do" required />
             </label>
             <label>Time
-              <input id="f-time" name="time" type="time" value="09:00" />
+              <input id="f-time" name="time" type="time" value="09:00" required />
               <span class="field-error" id="time-error" role="alert" hidden>Pick a future date and time.</span>
             </label>
             <label id="once-date-label">Date
@@ -133,6 +133,7 @@
                   </span>
                 </label>
               </div>
+              <div class="mode-hint" id="short-interval-warning" role="status" hidden>Alarms for minute/hour repeats only cover the next 24 occurrences while the app is closed.</div>
               <span class="select-wrap" hidden>
                 <select id="f-repeat" name="repeat" hidden aria-hidden="true"></select>
               </span>

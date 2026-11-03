@@ -66,26 +66,53 @@ html.native-app .home-screen { padding-top: 16px; }
 .task-count { padding: 6px 10px; border-radius: 20px; color: #3d87de; background: rgba(255,255,255,.84); font-size: 10px; font-weight: 600; }
 .schedule-list { min-height: 0; flex: 1; display: grid; align-content: start; gap: 9px; padding: 6px 0 110px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; -webkit-mask-image: linear-gradient(to bottom, transparent, black 14px); mask-image: linear-gradient(to bottom, transparent, black 14px); }
 .schedule-list::-webkit-scrollbar { display: none; }
-.schedule-item { position: relative; min-height: 63px; display: grid; grid-template-columns: 54px 4px minmax(0,1fr) auto 30px 28px; align-items: center; gap: 7px; padding: 9px 12px; text-align: left; border: 1px solid rgba(255,255,255,.84); border-radius: 15px; background: rgba(255,255,255,.88); box-shadow: 0 8px 20px rgba(68,100,138,.07); transition: transform 150ms ease, box-shadow 150ms ease; }
-.schedule-item:hover { transform: translateY(-2px); box-shadow: 0 11px 24px rgba(68,100,138,.11); }
-.schedule-item:active { transform: scale(.98); }
-.schedule-item time { color: #57616d; font-size: 11px; font-weight: 650; white-space: nowrap; }
-.schedule-accent { width: 4px; height: 35px; border-radius: 5px; }
-.blue-accent { background: #4898f2; }
-.orange-accent { background: #f3a34f; }
-.purple-accent { background: #9970e8; }
-.schedule-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
-.schedule-copy strong { font-size: 12px; font-weight: 650; }
-.schedule-copy small { overflow: hidden; color: #87919d; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.schedule-duration { color: #99a2ad; font-size: 9px; }
-.schedule-duration.due-label { color: #667383; white-space: nowrap; }
-.schedule-duration.overdue-label { color: #d65353; font-weight: 650; }
+.hero-card, .hero-empty { position: relative; display: grid; gap: 10px; padding: 16px; border: 1px solid rgba(255,255,255,.92); border-radius: 18px; background: rgba(255,255,255,.96); box-shadow: 0 10px 24px rgba(68,100,138,.1); }
+.hero-card.is-overdue { border-color: rgba(214,83,83,.2); }
+.hero-label { color: #667383; font-size: 11px; font-weight: 650; }
+.hero-label.is-alert, .hero-more-overdue { color: #d65353; }
+.hero-label.is-snoozed { color: #f3a34f; }
+.hero-title-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.hero-title-row h3 { min-width: 0; margin: 0; overflow: hidden; font-size: 18px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.hero-count { flex: 0 0 auto; color: #667383; font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hero-meta { display: flex; align-items: center; gap: 5px; color: #667383; font-size: 10px; }
+.hero-meta svg { color: #87919d; }
+.hero-progress-copy { margin-left: -5px; }
+.hero-progress { height: 3px; overflow: hidden; border-radius: 4px; background: #e8eef5; }
+.hero-progress span { height: 100%; display: block; border-radius: inherit; background: #4095f4; }
+.hero-actions { display: flex; gap: 8px; margin-top: 2px; }
+.hero-actions button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; cursor: pointer; border-radius: 10px; font-size: 11px; font-weight: 650; }
+.hero-done { color: #fff; background: #4095f4; }
+.hero-done:hover { background: #2f83e0; }
+.hero-snooze { border: 1px solid #cfe0f2 !important; color: #536274; background: #fff; }
+.hero-snooze:hover { background: #f3f8ff; }
+.hero-more-overdue { font-size: 10px; font-weight: 650; }
+.hero-empty { gap: 4px; padding: 16px; color: #667383; }
+.hero-empty strong { font-size: 13px; font-weight: 650; }
+.hero-empty span { color: #87919d; font-size: 10px; }
+.schedule-group { display: grid; gap: 6px; }
+.schedule-group-heading { display: flex; align-items: center; gap: 6px; margin: 2px 3px 0; color: #667383; font-size: 10px; font-weight: 700; }
+.schedule-group-heading span { min-width: 17px; padding: 2px 5px; border-radius: 9px; color: #758293; background: rgba(255,255,255,.8); font-size: 9px; text-align: center; }
+.schedule-group.is-overdue .schedule-group-heading { color: #d65353; }
+.schedule-group.is-overdue .schedule-group-heading span { color: #d65353; background: #fff0f0; }
+.schedule-group:has(.sched-row-relative.is-soon) .schedule-group-heading { color: #d88a37; }
+.schedule-group-card { overflow: visible; border: 1px solid rgba(255,255,255,.9); border-radius: 15px; background: rgba(255,255,255,.9); box-shadow: 0 7px 18px rgba(68,100,138,.06); }
+.sched-row { position: relative; min-height: 61px; display: grid; grid-template-columns: 48px minmax(0,1fr) auto 28px 28px; align-items: center; gap: 7px; padding: 8px 10px; }
+.sched-row + .sched-row { border-top: 1px solid rgba(112,132,155,.13); }
+.sched-row time { color: #57616d; font-size: 10px; font-weight: 650; white-space: nowrap; }
+.sched-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sched-row-copy strong { overflow: hidden; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.sched-row-copy small { display: flex; min-width: 0; align-items: center; overflow: hidden; color: #87919d; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sched-row-copy small svg { flex: 0 0 auto; margin-right: 4px; }
+.sched-row-relative { color: #667383; font-size: 9px; white-space: nowrap; }
+.sched-row-relative.is-soon { color: #d88a37; }
+.sched-row-relative.is-overdue { color: #d65353; font-weight: 650; }
+.sched-row-action-spacer { width: 28px; }
 .mark-done-button { width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; border: 1px solid #cfe4fa; border-radius: 50%; color: #4095f4; background: #f2f8ff; }
 .mark-done-button:hover { color: white; background: #4095f4; }
 .event-menu-wrap { position: relative; }
 .event-menu-trigger { width: 28px; height: 32px; display: grid; place-items: center; cursor: pointer; border-radius: 9px; color: #7e8997; background: transparent; transition: color 140ms ease, background 140ms ease; }
 .event-menu-trigger:hover, .event-menu-trigger[aria-expanded="true"] { color: #2f78cb; background: #edf5ff; }
-.schedule-item:has(.event-menu) { z-index: 30; }
+.sched-row:has(.event-menu) { z-index: 30; }
 .event-menu { position: absolute; z-index: 25; top: 36px; right: -5px; width: 112px; padding: 5px; border: 1px solid rgba(220,230,241,.95); border-radius: 12px; background: #fff; box-shadow: 0 12px 30px rgba(40,61,88,.18); animation: menu-in 130ms ease-out; }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
 .event-menu button { width: 100%; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 9px; cursor: pointer; border-radius: 8px; color: #384452; background: transparent; font-size: 11px; text-align: left; }

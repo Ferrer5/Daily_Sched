@@ -86,51 +86,53 @@ public class DueAlarmsPlugin extends Plugin {
                 Log.e(TAG, "Failed to store alarm settings", e);
             }
             // apply rule: if there is a pending patch for an item id, keep native's stored version of that item and ignore the incoming one
-            Set<Long> patchedIds = DueStore.getPatchedIds(appContext);
-            JSONArray stored = DueStore.getItemsJson(appContext);
-            // build map of stored by id
-            java.util.HashMap<Long, JSONObject> storedMap = new java.util.HashMap<Long, JSONObject>();
-            for (int i = 0; i < stored.length(); i++) {
-                try {
-                    JSONObject s = stored.getJSONObject(i);
-                    if (s.has("id")) {
-                        storedMap.put(s.getLong("id"), s);
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to read stored item at index " + i, e);
-                }
-            }
-            // build result array
-            JSONArray result = new JSONArray();
-            // items that are in incoming and not patched - add/update from incoming; items patched keep stored
-            // also need to track which incoming ids we've processed
-            Set<Long> incomingIds = new HashSet<Long>();
-            for (int i = 0; i < incoming.length(); i++) {
-                try {
-                    JSONObject in = incoming.getJSONObject(i);
-                    if (!in.has("id")) {
-                        continue;
-                    }
-                    long id = in.getLong("id");
-                    incomingIds.add(id);
-                    if (patchedIds.contains(id)) {
-                        // keep native's stored version
-                        if (storedMap.containsKey(id)) {
-                            result.put(storedMap.get(id));
-                        } else {
-                            // if not in stored map but patched, still skip incoming
+            synchronized (DueStore.class) {
+                Set<Long> patchedIds = DueStore.getPatchedIds(appContext);
+                JSONArray stored = DueStore.getItemsJson(appContext);
+                // build map of stored by id
+                java.util.HashMap<Long, JSONObject> storedMap = new java.util.HashMap<Long, JSONObject>();
+                for (int i = 0; i < stored.length(); i++) {
+                    try {
+                        JSONObject s = stored.getJSONObject(i);
+                        if (s.has("id")) {
+                            storedMap.put(s.getLong("id"), s);
                         }
-                    } else {
-                        // use incoming, normalize
-                        JSONObject out = normalizeIncoming(in);
-                        result.put(out);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to read stored item at index " + i, e);
                     }
-                } catch (Exception e) {
-                    Log.e(TAG, "Skipping invalid incoming item at index " + i, e);
                 }
+                // build result array
+                JSONArray result = new JSONArray();
+                // items that are in incoming and not patched - add/update from incoming; items patched keep stored
+                // also need to track which incoming ids we've processed
+                Set<Long> incomingIds = new HashSet<Long>();
+                for (int i = 0; i < incoming.length(); i++) {
+                    try {
+                        JSONObject in = incoming.getJSONObject(i);
+                        if (!in.has("id")) {
+                            continue;
+                        }
+                        long id = in.getLong("id");
+                        incomingIds.add(id);
+                        if (patchedIds.contains(id)) {
+                            // keep native's stored version
+                            if (storedMap.containsKey(id)) {
+                                result.put(storedMap.get(id));
+                            } else {
+                                // if not in stored map but patched, still skip incoming
+                            }
+                        } else {
+                            // use incoming, normalize
+                            JSONObject out = normalizeIncoming(in);
+                            result.put(out);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Skipping invalid incoming item at index " + i, e);
+                    }
+                }
+                // items no longer in incoming list are deleted - don't add them
+                DueStore.saveItems(appContext, result);
             }
-            // items no longer in incoming list are deleted - so don't add them
-            DueStore.saveItems(appContext, result);
             try {
                 DueScheduler.rescheduleAll(appContext);
             } catch (Exception e) {
