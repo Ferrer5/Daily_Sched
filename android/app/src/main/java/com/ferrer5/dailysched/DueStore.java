@@ -20,6 +20,7 @@ public class DueStore {
     private static final String KEY_OVERDUE_REMINDERS = "overdue_reminders";
     private static final String KEY_SOUND_ID = "sound_id";
     private static final String KEY_SCHEDULED_CODES = "scheduled_codes";
+    private static final String KEY_SHORT_REPEAT_IDS = "short_repeat_ids";
     private static final String KEY_PATCHES = "patches";
 
     private static SharedPreferences getPrefs(Context context) {
@@ -64,6 +65,8 @@ public class DueStore {
         } else {
             item.id = 0;
         }
+        item.repeat = obj.optString("repeat", "");
+        item.startAt = obj.optLong("startAt", 0);
         item.title = obj.optString("title", "");
         item.detail = obj.optString("detail", "");
         item.time = obj.optString("time", "00:00");
@@ -98,6 +101,8 @@ public class DueStore {
     public static JSONObject itemToJson(DueMath.Item item) throws JSONException {
         JSONObject obj = new JSONObject();
         obj.put("id", item.id);
+        obj.put("repeat", item.repeat == null ? "" : item.repeat);
+        obj.put("startAt", item.startAt);
         obj.put("title", item.title == null ? "" : item.title);
         obj.put("detail", item.detail == null ? "" : item.detail);
         obj.put("time", item.time == null ? "00:00" : item.time);
@@ -229,6 +234,30 @@ public class DueStore {
             }
         }
         getPrefs(context).edit().putStringSet(KEY_SCHEDULED_CODES, set).apply();
+    }
+
+    public static Set<Long> getShortRepeatIds(Context context) {
+        Set<String> stored = getPrefs(context).getStringSet(KEY_SHORT_REPEAT_IDS, new HashSet<String>());
+        Set<Long> ids = new HashSet<Long>();
+        if (stored == null) return ids;
+        for (String value : stored) {
+            try {
+                ids.add(Long.parseLong(value));
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Ignoring invalid short-repeat item id " + value, e);
+            }
+        }
+        return ids;
+    }
+
+    public static void saveShortRepeatIds(Context context, Set<Long> ids) {
+        Set<String> stored = new HashSet<String>();
+        if (ids != null) {
+            for (Long id : ids) {
+                if (id != null) stored.add(String.valueOf(id));
+            }
+        }
+        getPrefs(context).edit().putStringSet(KEY_SHORT_REPEAT_IDS, stored).apply();
     }
 
     public static synchronized void addPatch(Context context, long id, String dueDate, String time, int doneCount, String lastDone, Long snoozeUntil) {

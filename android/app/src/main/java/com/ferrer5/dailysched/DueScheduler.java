@@ -44,6 +44,9 @@ public class DueScheduler {
         Set<Long> patchedIds = DueStore.getPatchedIds(appContext);
         for (DueMath.Item item : items) {
             try {
+                if (ShortRepeatScheduler.isShortRepeat(item)) {
+                    continue;
+                }
                 // If there is a pending patch for an item id, keep native's stored version - we already have stored version; but sync rule says ignore incoming if patch pending. 
                 // For rescheduling, just schedule based on stored items (which are kept if patched)
                 if (patchedIds.contains(item.id)) {
@@ -107,10 +110,12 @@ public class DueScheduler {
             }
         }
         DueStore.saveScheduledCodes(appContext, newCodes);
+        ShortRepeatScheduler.rescheduleAll(appContext);
     }
 
     public static void cancelItem(Context context, long id) {
         Context appContext = context.getApplicationContext();
+        ShortRepeatScheduler.cancelItem(appContext, id);
         AlarmManager alarmManager = (AlarmManager) appContext.getSystemService(Context.ALARM_SERVICE);
         if (alarmManager != null) {
             for (int k = 0; k <= 10; k++) {

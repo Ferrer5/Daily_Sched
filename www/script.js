@@ -1718,8 +1718,13 @@ function snoozeDynamic(id) {
 async function syncDueAlarms() {
   try {
     if (!DueAlarms) return;
-    const items = schedule.filter(i => i.repeat === "dynamic" && !isFinished(i)).map(i => ({
+    const items = schedule.filter(i => (
+      i.repeat === "dynamic"
+      || (i.repeat === "interval" && isShortUnit(i.interval?.unit))
+    ) && !isFinished(i)).map(i => ({
       id: i.id,
+      repeat: i.repeat,
+      startAt: i.repeat === "interval" ? startAtOf(i) : 0,
       title: i.title,
       detail: i.detail,
       time: i.time,
@@ -1795,6 +1800,7 @@ async function scheduleAllImpl() {
     for (const item of schedule) {
       if (isFinished(item)) continue;
       if (item.repeat === "dynamic") continue;
+      if (item.repeat === "interval" && isShortUnit(item.interval?.unit)) continue;
       if (!isValidTime(item.time)) {
         console.warn(`Skipping alarm for ${item.title}: invalid time.`);
         continue;

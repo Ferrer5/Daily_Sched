@@ -150,6 +150,8 @@ public class DueAlarmsPlugin extends Plugin {
         try {
             JSONObject out = new JSONObject();
             out.put("id", in.getLong("id"));
+            out.put("repeat", in.optString("repeat", ""));
+            out.put("startAt", in.optLong("startAt", 0));
             out.put("title", in.optString("title", ""));
             out.put("detail", in.optString("detail", ""));
             out.put("time", in.optString("time", "00:00"));

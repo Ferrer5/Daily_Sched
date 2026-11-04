@@ -19,6 +19,8 @@ public class DueMath {
 
     public static class Item {
         public long id;
+        public String repeat;
+        public long startAt;
         public String title;
         public String detail;
         public String time;        // "HH:mm"
@@ -33,6 +35,8 @@ public class DueMath {
         public Item copy() {
             Item item = new Item();
             item.id = this.id;
+            item.repeat = this.repeat;
+            item.startAt = this.startAt;
             item.title = this.title;
             item.detail = this.detail;
             item.time = this.time;
